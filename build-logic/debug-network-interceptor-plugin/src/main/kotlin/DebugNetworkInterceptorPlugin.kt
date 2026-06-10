@@ -5,15 +5,25 @@ import com.android.build.api.instrumentation.FramesComputationMode
 import com.android.build.api.instrumentation.InstrumentationParameters
 import com.android.build.api.instrumentation.InstrumentationScope
 import com.android.build.api.variant.ApplicationAndroidComponentsExtension
+import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFile
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
+import java.io.File
 import javax.inject.Inject
 
 open class DebugNetworkInterceptorExtension @Inject constructor(objects: ObjectFactory) {
@@ -52,6 +62,35 @@ class DebugNetworkInterceptorPlugin : Plugin<Project> {
                             "scope=$scope logEnabled=${extension.logEnabled.get()}"
                 )
 
+                val appConfigFile = project.findVariantDebugNetworkConfigFile(
+                    variant.name,
+                    variant.productFlavors.map { it.second }
+                )
+                if (appConfigFile != null) {
+                    val copyConfigTask = project.tasks.register(
+                        "copy${variant.name.replaceFirstChar { it.uppercase() }}DebugNetworkConfigAsset",
+                        CopyDebugNetworkConfigAssetTask::class.java
+                    ) { task ->
+                        task.inputConfigFile.set(appConfigFile)
+                        task.outputDirectory.set(
+                            project.layout.buildDirectory.dir("generated/debugNetworkConfig/${variant.name}/assets")
+                        )
+                    }
+                    variant.sources.assets?.addGeneratedSourceDirectory(
+                        copyConfigTask,
+                        CopyDebugNetworkConfigAssetTask::outputDirectory
+                    )
+                    project.logger.lifecycle(
+                        "[DebugNetworkInterceptorPlugin] variant=${variant.name} " +
+                                "use app debug network config asset=${appConfigFile.asFile}"
+                    )
+                } else {
+                    project.logger.lifecycle(
+                        "[DebugNetworkInterceptorPlugin] variant=${variant.name} " +
+                                "use bundled debug network config asset"
+                    )
+                }
+
                 variant.instrumentation.transformClassesWith(
                     DebugNetworkInterceptorClassVisitorFactory::class.java,
                     scope
@@ -64,6 +103,26 @@ class DebugNetworkInterceptorPlugin : Plugin<Project> {
                 )
             }
         }
+    }
+}
+
+abstract class CopyDebugNetworkConfigAssetTask : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val inputConfigFile: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val outputFile = outputDirectory.file(DEBUG_NETWORK_CONFIG_FILE_NAME).get().asFile
+        outputFile.parentFile.mkdirs()
+        inputConfigFile.get().asFile.copyTo(outputFile, overwrite = true)
+        logger.lifecycle(
+            "[DebugNetworkInterceptorPlugin] copied app debug network config " +
+                    "from=${inputConfigFile.get().asFile} to=$outputFile"
+        )
     }
 }
 
@@ -229,3 +288,46 @@ private fun ClassData.isApplicationSubclass(): Boolean {
         superClass == "android.app.Application" || superClass == "android/app/Application"
     }
 }
+
+private fun Project.findVariantDebugNetworkConfigFile(
+    variantName: String,
+    flavorNames: List<String>
+): RegularFile? {
+    val srcDir = projectDir.resolve("src")
+    if (!srcDir.isDirectory) {
+        return null
+    }
+
+    buildDebugConfigSourceSetNames(variantName, flavorNames).forEach { sourceSetName ->
+        val candidate = File(srcDir, "$sourceSetName/$DEBUG_NETWORK_CONFIG_FILE_NAME")
+        if (candidate.isFile) {
+            return layout.projectDirectory.file(candidate.relativeTo(projectDir).path)
+        }
+    }
+
+    return srcDir.walkTopDown()
+        .firstOrNull { file -> file.isFile && file.name == DEBUG_NETWORK_CONFIG_FILE_NAME }
+        ?.let { file -> layout.projectDirectory.file(file.relativeTo(projectDir).path) }
+}
+
+private fun buildDebugConfigSourceSetNames(
+    variantName: String,
+    flavorNames: List<String>
+): List<String> {
+    val names = linkedSetOf<String>()
+    names += variantName
+    if (flavorNames.isNotEmpty()) {
+        names += flavorNames.joinToString(separator = "") { flavor ->
+            flavor.replaceFirstChar { it.uppercase() }
+        }.replaceFirstChar { it.lowercase() }
+    }
+    names += DEBUG_BUILD_TYPE_NAME
+    // 多渠道业务通常把 App 维度放在 market 之后，倒序可优先命中 src/funshorts 这类当前 App 配置。
+    flavorNames.asReversed().forEach { names += it }
+    names += MAIN_SOURCE_SET_NAME
+    return names.toList()
+}
+
+private const val DEBUG_NETWORK_CONFIG_FILE_NAME = "debug_network_config.json"
+private const val DEBUG_BUILD_TYPE_NAME = "debug"
+private const val MAIN_SOURCE_SET_NAME = "main"
