@@ -237,16 +237,11 @@ object DebugNetworkConfigManager {
     private fun parseConfig(json: JSONObject): DebugNetworkConfig {
         val normalizedJson = normalizeConfigJson(json)
         val rules = normalizedJson.optJSONArray("rules").orEmpty().mapObjects { ruleJson ->
-            val mappings = ruleJson.optJSONArray("mappings").orEmpty().mapObjects { mappingJson ->
-                DebugNetworkMapping(
-                    source = mappingJson.optString("source").trim(),
-                    target = mappingJson.optString("target").trim()
-                )
-            }.filter { it.source.isNotEmpty() && it.target.isNotEmpty() }
+            val mappings = buildRuleMappings(normalizedJson, ruleJson)
 
             DebugNetworkRule(
                 id = ruleJson.optString("id").trim(),
-                name = ruleJson.optString("name", ruleJson.optString("id")).trim(),
+                name = resolveRuleName(normalizedJson, ruleJson),
                 mappings = mappings
             )
         }.filter { it.id.isNotEmpty() }
@@ -287,6 +282,13 @@ object DebugNetworkConfigManager {
                 templateJson.optJSONArray("rules").orEmpty()
             )
         )
+        merged.put(
+            "environments",
+            mergeEnvironments(
+                merged.optJSONObject("environments"),
+                templateJson.optJSONObject("environments")
+            )
+        )
         if (!merged.has("selectRuleIds")) {
             merged.put("selectRuleIds", JSONArray())
         }
@@ -309,10 +311,81 @@ object DebugNetworkConfigManager {
         if (!normalizedJson.has("rules")) {
             normalizedJson.put("rules", JSONArray())
         }
+        if (!normalizedJson.has("environments")) {
+            normalizedJson.put("environments", JSONObject())
+        }
         if (!normalizedJson.has("selectRuleIds")) {
             normalizedJson.put("selectRuleIds", JSONArray())
         }
         return normalizedJson
+    }
+
+    private fun buildRuleMappings(configJson: JSONObject, ruleJson: JSONObject): List<DebugNetworkMapping> {
+        val mappingsBySource = linkedMapOf<String, DebugNetworkMapping>()
+        buildEnvMappings(configJson, ruleJson).forEach { mapping ->
+            mappingsBySource[mapping.source] = mapping
+        }
+        parseExplicitMappings(ruleJson).forEach { mapping ->
+            // 显式 mappings 用来处理单个接口的特殊覆盖，优先级高于 env 自动展开结果。
+            mappingsBySource[mapping.source] = mapping
+        }
+        return mappingsBySource.values.toList()
+    }
+
+    private fun buildEnvMappings(configJson: JSONObject, ruleJson: JSONObject): List<DebugNetworkMapping> {
+        val envId = ruleJson.optString("env").trim()
+        if (envId.isEmpty()) return emptyList()
+
+        val environments = configJson.optJSONObject("environments") ?: return emptyList()
+        val targetEnv = environments.optJSONObject(envId)
+        if (targetEnv == null) {
+            log("rule env not found ruleId=${ruleJson.optString("id")} env=$envId")
+            return emptyList()
+        }
+
+        val result = mutableListOf<DebugNetworkMapping>()
+        targetEnv.forEachKey { serviceKey ->
+            if (serviceKey == "name") return@forEachKey
+            if (targetEnv.opt(serviceKey) !is String) return@forEachKey
+
+            val target = targetEnv.optString(serviceKey).trim()
+            if (target.isEmpty()) {
+                log("empty target env=$envId service=$serviceKey")
+                return@forEachKey
+            }
+
+            environments.forEachObjectValue { sourceEnvId, sourceEnv ->
+                val source = sourceEnv.optString(serviceKey).trim()
+                if (source.isEmpty()) {
+                    log("missing source env=$sourceEnvId service=$serviceKey targetEnv=$envId")
+                    return@forEachObjectValue
+                }
+                result.add(DebugNetworkMapping(source = source, target = target))
+            }
+        }
+        return result
+    }
+
+    private fun parseExplicitMappings(ruleJson: JSONObject): List<DebugNetworkMapping> {
+        return ruleJson.optJSONArray("mappings").orEmpty().mapObjects { mappingJson ->
+            DebugNetworkMapping(
+                source = mappingJson.optString("source").trim(),
+                target = mappingJson.optString("target").trim()
+            )
+        }.filter { it.source.isNotEmpty() && it.target.isNotEmpty() }
+    }
+
+    private fun resolveRuleName(configJson: JSONObject, ruleJson: JSONObject): String {
+        val explicitName = ruleJson.optString("name").trim()
+        if (explicitName.isNotEmpty()) return explicitName
+
+        val envId = ruleJson.optString("env").trim()
+        val envName = configJson.optJSONObject("environments")
+            ?.optJSONObject(envId)
+            ?.optString("name")
+            .orEmpty()
+            .trim()
+        return envName.ifEmpty { ruleJson.optString("id").trim() }
     }
 
     private fun flattenLegacyRules(groups: JSONArray): JSONArray {
@@ -360,8 +433,25 @@ object DebugNetworkConfigManager {
             }
 
             copyIfMissing(currentRule, templateRule, "name")
+            copyIfMissing(currentRule, templateRule, "env")
             // mappings 是调试人员最可能改成真实域名的字段，模板升级只在完全缺失时补齐，避免覆盖手工配置。
             copyIfMissing(currentRule, templateRule, "mappings")
+        }
+        return result
+    }
+
+    private fun mergeEnvironments(currentEnvironments: JSONObject?, templateEnvironments: JSONObject?): JSONObject {
+        val result = JSONObject(currentEnvironments?.toString() ?: "{}")
+        templateEnvironments?.forEachObjectValue { envId, templateEnv ->
+            val currentEnv = result.optJSONObject(envId)
+            if (currentEnv == null) {
+                result.put(envId, JSONObject(templateEnv.toString()))
+                return@forEachObjectValue
+            }
+
+            templateEnv.forEachKey { key ->
+                copyIfMissing(currentEnv, templateEnv, key)
+            }
         }
         return result
     }
@@ -404,6 +494,20 @@ object DebugNetworkConfigManager {
             if (item.optString("id") == id) return item
         }
         return null
+    }
+
+    private inline fun JSONObject.forEachKey(action: (String) -> Unit) {
+        val iterator = keys()
+        while (iterator.hasNext()) {
+            action(iterator.next())
+        }
+    }
+
+    private inline fun JSONObject.forEachObjectValue(action: (String, JSONObject) -> Unit) {
+        forEachKey { key ->
+            val value = optJSONObject(key) ?: return@forEachKey
+            action(key, value)
+        }
     }
 
     private fun List<String>.toJsonArray(): JSONArray {

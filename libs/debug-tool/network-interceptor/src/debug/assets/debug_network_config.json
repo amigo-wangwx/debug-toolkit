@@ -1,43 +1,35 @@
 {
-  "version": 1,
-  "templateVersion": 2,
+  "version": 2,
+  "templateVersion": 3,
+  "environments": {
+    "dev": {
+      "name": "开发环境",
+      "api": "https:\/\/dev-api.a.com",
+      "h5": "https:\/\/dev-h5.a.com"
+    },
+    "test": {
+      "name": "测试环境",
+      "api": "https:\/\/test-api.a.com",
+      "h5": "https:\/\/test-h5.a.com"
+    },
+    "prod": {
+      "name": "生产环境",
+      "api": "https:\/\/api.a.com",
+      "h5": "https:\/\/h5.a.com"
+    }
+  },
   "rules": [
     {
       "id": "dev",
-      "name": "开发环境",
-      "mappings": [
-        {
-          "source": "https:\/\/api.a.com",
-          "target": "https:\/\/dev-api.a.com"
-        },
-        {
-          "source": "https:\/\/api.b.com",
-          "target": "https:\/\/dev-api.b.com"
-        },
-        {
-          "source": "www.baidu.com",
-          "target": "www.baidu1.com"
-        }
-      ]
+      "env": "dev"
     },
     {
       "id": "test",
-      "name": "测试环境",
-      "mappings": [
-        {
-          "source": "https:\/\/api.a.com",
-          "target": "https:\/\/test-api.a.com"
-        },
-        {
-          "source": "https:\/\/api.b.com",
-          "target": "https:\/\/test-api.b.com"
-        }
-      ]
+      "env": "test"
     },
     {
       "id": "prod",
-      "name": "生产环境",
-      "mappings": []
+      "env": "prod"
     }
   ],
   "selectRuleIds": [
