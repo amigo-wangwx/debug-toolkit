@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>深度链接参考列表</title>
+
+    <script>
+        function goToApp() {
+          var links = generateLinks();
+            alert(links.deepLink);
+            try {
+              checkAndroidAppInstalled();
+            } catch (e) {
+              alert(e);
+              window.location.href = links.googlePlayLink;
+            }
+          }
+
+        function checkAndroidAppInstalled() {
+          var iframe = document.getElementById("iframe");
+          var { deepLink, googlePlayLink, universalLink } = generateLinks();
+          iframe.src = deepLink;
+          setTimeout(function() {
+            if (iframe.contentWindow.location.href === deepLink) {
+              alert("App is installed");
+            } else {
+              alert("App is not installed");
+              window.location.href = universalLink;
+              // window.open(universalLink);
+              // iframe.src = universalLink;
+            }
+          }, 1000);
+        }
+
+        function generateLinks() {
+          var universalLink = 'https://b4scdn.shortdramalabs.com/apps/reelrush/';
+
+          // 安卓自启动的链接
+          // var deepLink = 'intent://apps/reelrush#Intent;scheme=https;package=company.reelrush.and;host=b4scdn.shortdramalabs.com;end;';
+          deepLink = 'intent://b4scdn.shortdramalabs.com/apps/reelrush#Intent;scheme=https;package=company.reelrush.and;end;';
+          deepLink = 'reelrush://navigator/ranking/123?section=53';
+
+          // 谷歌应用商店的链接
+          var googlePlayLink = "market://details?id=company.reelrush.and";
+          return { deepLink, universalLink, googlePlayLink };
+        }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f7f7f7; margin: 0; padding: 20px; color: #333; line-height: 1.5; }
+        .container { max-width: 600px; margin: 0 auto; }
+
+        /* --- 卡片通用样式 --- */
+        .card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            /* 使用变量 var(--site-color)，如果没有定义，默认为蓝色 #007AFF */
+            border-top: 4px solid var(--site-color, #007AFF);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            /* 标题颜色也跟随变量 */
+            color: var(--site-color, #007AFF);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sub-title {
+            font-size: 13px;
+            color: #888;
+            margin-top: -10px;
+            margin-bottom: 12px;
+            padding-left: 5px;
+            font-weight: 500;
+        }
+
+        /* --- 按钮通用样式 --- */
+        .btn-link {
+            display: flex; align-items: center; justify-content: center;
+            width: 100%; padding: 12px 15px; margin-bottom: 10px;
+            color: white; text-decoration: none;
+            border-radius: 8px; font-size: 15px; font-weight: 500;
+            transition: opacity 0.2s, transform 0.1s;
+            border: none; cursor: pointer;
+            /* 按钮背景色跟随变量 */
+            background-color: var(--site-color, #007AFF);
+        }
+
+        /* Intent 按钮稍微淡一点，便于区分 (可选) */
+        .btn-link.intent {
+            opacity: 0.9;
+        }
+
+        .btn-link:active { opacity: 0.8; transform: scale(0.98); }
+        .card .btn-link:last-child { margin-bottom: 0; }
+
+        /* --- 特殊样式（不受变量影响） --- */
+        .btn-link.back { background-color: #8E8E93; }
+
+
+        .bottom-box {
+          opacity: 1;
+          position: fixed;
+          bottom: 0.9rem;
+          /* 15px / 100 */
+          display: flex;
+          width: 100%;
+          height: 100px;
+          padding: 0.25rem 0.12rem;
+          /* 25px 12px / 100 */
+          box-sizing: border-box;
+          z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- 站点 1: TapShort -->
+    <!-- 只需要在这里定义 style="--site-color: #FF9500"，下面所有元素会自动变成橙色 -->
+    <div class="card" style="--site-color: #FF9500;">
+        <div class="card-title">
+            TapShort (FinalNovel)
+        </div>
+
+        <div class="sub-title">通用链接 (HTTPS)</div>
+        <a href="https://b4scdn.finalnovel.net/apps/tapshort" class="btn-link">打开 App 详情页面</a>
+        <a href="https://b4scdn.finalnovel.net/apps/tapshort/app" class="btn-link">打开 App 详情页面 1</a>
+
+        <div class="sub-title">Intent 调用 (Android)</div>
+        <a href="intent://apps/tapshort#Intent;scheme=https;package=com.finalnovel.app;host=b4scdn.finalnovel.net;end;" class="btn-link intent">打开 App 详情页面 2</a>
+        <a href="intent://b4scdn.finalnovel.net/apps/tapshort#Intent;scheme=https;package=com.tapshort.app;end;" class="btn-link intent">打开 App 详情页面 3</a>
+        <a href="intent://b4scdn.finalnovel.net/apps/tapshort/xxx#Intent;scheme=https;package=com.tapshort.app;end;" class="btn-link intent">打开 App 详情页面 4</a>
+        <a href="intent://apps/tapshort#Intent;scheme=finalnovel;package=com.finalnovel.app;S.browser_fallback_url=https://play.google.com/store/apps/details?id=com.finalnovel.app;end;" class="btn-link intent">TapShort (Apps: Play Store)</a>
+        <a href="intent://deeplink/apps/tapshort#Intent;scheme=finalnovel;package=com.finalnovel.app;S.browser_fallback_url=https://play.google.com/store/apps/details?id=com.finalnovel.app;end;" class="btn-link intent">TapShort (Fallback: Play Store)</a>
+
+        <div class="sub-title">Scheme (自定义协议)</div>
+        <a href="finalnovel://navigator/video/player/174875?ndl_pid=snapchat_int&ndl_campaign_id={{campaign.id}}&ndl_ad_id={{ad.id}}&ndl_adset_id={{adSet.id}}&ndl_act_id=bed53a6d-0670-4868-a58b-1a3393ef9a43&ndl_book_id=174875&lang=en-us&pid=snapchat_int&utm_source={{site_source_name}}" class="btn-link">TapShort (Snap 测试链接)</a>
+        <a href="finalnovel://navigator/ranking/123?section=53" class="btn-link">TapShort (RankingMore 测试链接)</a>
+    </div>
+
+    <!-- 站点 2: ReelRush -->
+    <!-- 修改这里的颜色变量即可改变整个卡片颜色 -->
+    <div class="card" style="--site-color: #FF3B30;">
+        <div class="card-title">
+            ReelRush
+        </div>
+
+        <div class="sub-title">通用链接 (HTTPS)</div>
+        <a href="https://b4scdn.shortdramalabs.com/apps/reelrush/" class="btn-link">打开 App 详情页面</a>
+
+        <div class="sub-title">Intent 调用 (Android)</div>
+        <a href="intent://apps/reelrush#Intent;scheme=reelrush;package=company.reelrush.and;S.browser_fallback_url=https://play.google.com/store/apps/details?id=company.reelrush.and;end;" class="btn-link intent">ReelRush (Apps: Play Store)</a>
+        <a href="intent://apps/reelrush#Intent;scheme=reelrush;package=company.reelrush.and;host=b4scdn.shortdramalabs.com;end;" class="btn-link intent">ReelRush (Apps: HOST )</a>
+        <a href="intent://deeplink/apps/reelrush#Intent;scheme=reelrush;package=company.reelrush.and;host=b4scdn.shortdramalabs.com;end;" class="btn-link intent">ReelRush (deeplink Apps: HOST )</a>
+        <a href="intent://deeplink/apps/reelrush#Intent;scheme=reelrush;package=company.reelrush.and;S.browser_fallback_url=https://play.google.com/store/apps/details?id=company.reelrush.and;end;" class="btn-link intent">ReelRush (Fallback: Play Store)</a>
+
+        <div class="sub-title">Scheme (自定义协议)</div>
+        <a href="reelrush://navigator/video/player/172842?ndl_pid=snapchat_int&ndl_campaign_id={{campaign.id}}&ndl_ad_id={{ad.id}}&ndl_adset_id={{adSet.id}}&ndl_act_id=bed53a6d-0670-4868-a58b-1a3393ef9a43&ndl_book_id=174875&lang=en-us&pid=snapchat_int&utm_source={{site_source_name}}" class="btn-link">ReelRush (Snap 测试链接)</a>
+        <a href="reelrush://navigator/ranking/123?section=53" class="btn-link">ReelRush (RankingMore 测试链接)</a>
+
+        <div class="sub-title">IFrame Scheme (自定义协议)</div>
+
+        <div class="sub-title" onclick="goToApp()">IFrame
+            <iframe id="iframe"></iframe>
+
+        </div>
+    </div>
+
+    <!-- 站点 3: 测试/通用 -->
+    <div class="card" style="--site-color: #5856D6;">
+        <div class="card-title">
+            测试 & 工具
+        </div>
+
+        <div class="sub-title">Intent 测试 (Fallback Zxing)</div>
+        <a href="intent://apps/tapshort#Intent;scheme=finalnovel;package=com.tapshort.app;S.browser_fallback_url=http%3A%2F%2Fzxing.org;end;" class="btn-link intent">Take a QR code (Fallback: zxing.org)</a>
+    </div>
+
+    <!-- 返回按钮 -->
+    <div class="card" id="back-btn-container">
+        <button onclick="handleBack()" class="btn-link back">⬅️ 返回工具主页</button>
+    </div>
+
+</div>
+
+<script>
+    // --- 逻辑 1: 判断环境，决定是否显示返回按钮 ---
+    if (window.self === window.top) {
+        var backContainer = document.getElementById('back-btn-container');
+        if (backContainer) {
+            backContainer.style.display = 'none';
+        }
+    }
+
+    // --- 逻辑 2: 处理返回操作 ---
+    function handleBack() {
+        window.top.postMessage({ action: 'close-frame' }, '*');
+    }
+</script>
+
+</body>
+</html>

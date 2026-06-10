@@ -1,0 +1,52 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 9 及以下写公共 Download 需要存储权限；Android 10+ 通过 MediaStore 写入，不需要权限。 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <application>
+        <provider
+            android:name=".DebugNetworkInitProvider"
+            android:authorities="${applicationId}.debugnetwork.init"
+            android:exported="false"
+            android:multiprocess="false" />
+
+        <activity
+            android:name=".DebugNetworkConfigEditorActivity"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:process=":debug_network_config"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+            <intent-filter>
+                <action android:name="com.debugtoolkit.networkinterceptor.action.EDIT_CONFIG" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:mimeType="application/json" />
+                <data android:mimeType="text/json" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="file"
+                    android:pathPattern=".*\\.json" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".DebugNetworkConfigReloadReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

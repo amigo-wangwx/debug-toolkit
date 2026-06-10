@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "templateVersion": 2,
+  "rules": [
+    {
+      "id": "dev",
+      "name": "开发环境",
+      "mappings": [
+        {
+          "source": "https:\/\/api.a.com",
+          "target": "https:\/\/dev-api.a.com"
+        },
+        {
+          "source": "https:\/\/api.b.com",
+          "target": "https:\/\/dev-api.b.com"
+        },
+        {
+          "source": "www.baidu.com",
+          "target": "www.baidu1.com"
+        }
+      ]
+    },
+    {
+      "id": "test",
+      "name": "测试环境",
+      "mappings": [
+        {
+          "source": "https:\/\/api.a.com",
+          "target": "https:\/\/test-api.a.com"
+        },
+        {
+          "source": "https:\/\/api.b.com",
+          "target": "https:\/\/test-api.b.com"
+        }
+      ]
+    },
+    {
+      "id": "prod",
+      "name": "生产环境",
+      "mappings": []
+    }
+  ],
+  "selectRuleIds": [
+    "dev"
+  ]
+}

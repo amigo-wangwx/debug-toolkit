@@ -1,0 +1,58 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 悬浮窗权限（必须） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <application>
+        <!-- 初始化Provider（自动加载配置并启动服务） -->
+        <provider
+            android:name=".DebugInitProvider"
+            android:authorities="${applicationId}.debugtoolkit.init"
+            android:exported="false"
+            android:multiprocess="false" />
+
+        <!-- 浮窗服务（显示调试工具） -->
+        <service
+            android:name=".DebugFloatingWindowService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
+        <!-- WebView Activity -->
+        <activity
+            android:name=".DebugWebViewActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DebugToolkit.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <!-- Logcat 配置 (根据文档) -->
+        <!-- 关闭悬浮窗入口，使用通知栏入口 -->
+        <meta-data
+            android:name="LogcatWindowEntrance"
+            android:value="false" />
+        <meta-data
+            android:name="LogcatNotifyEntrance"
+            android:value="false" />
+
+        <!-- 设置默认日志级别为 ERROR -->
+        <meta-data
+            android:name="LogcatDefaultLogLevel"
+            android:value="E" />
+
+        <!-- 关闭日志自动合并打印 -->
+        <meta-data
+            android:name="LogcatAutoMergePrint"
+            android:value="false" />
+
+        <!-- 设置日志样式为带边框 -->
+        <meta-data
+            android:name="LogcatLogStyle"
+            android:value="1" />
+
+    </application>
+
+</manifest>
