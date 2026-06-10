@@ -1,5 +1,9 @@
 # Debug Toolkit
 
+[![](https://jitpack.io/v/amigo-wangwx/debug-toolkit.svg)](https://jitpack.io/#amigo-wangwx/debug-toolkit)
+
+JitPack 地址：https://jitpack.io/#amigo-wangwx/debug-toolkit
+
 ## 项目简介
 
 Debug Toolkit 是一套 Android 开发调试工具包，包含三个模块：
@@ -27,7 +31,7 @@ pluginManagement {
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id == "com.debugtoolkit.debug-network-interceptor") {
-                useModule("com.github.amigo-wangwx.debug-toolkit:debug-network-interceptor-plugin:${requested.version}")
+                useModule("com.github.amigo-wangwx.debug-toolkit:debug-network-interceptor-plugin:<version>")
             }
         }
     }
@@ -48,31 +52,36 @@ dependencyResolutionManagement {
 
 ```gradle
 plugins {
-    id 'com.debugtoolkit.debug-network-interceptor' version 'v1.0.0'
+    id 'com.debugtoolkit.debug-network-interceptor' version '<version>'
 }
+```
+
+也可以使用传统 `buildscript` 方式接入：
+
+```gradle
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+    dependencies {
+        classpath 'com.github.amigo-wangwx.debug-toolkit:debug-network-interceptor-plugin:<version>'
+    }
+}
+
+apply plugin: 'com.debugtoolkit.debug-network-interceptor'
 ```
 
 ### 3. 添加依赖
 
 ```gradle
 dependencies {
-    debugImplementation 'com.github.amigo-wangwx.debug-toolkit:debug-toolkit:v1.0.0'
+    debugImplementation 'com.github.amigo-wangwx.debug-toolkit:debug-toolkit:<version>'
 }
 ```
 
-`debug-toolkit` 已依赖 `network-interceptor`，通常只需一行依赖即可。
-
-## 发布版本
-
-在 GitHub 仓库创建标签即可触发 JitPack 自动构建：
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-构建完成后，访问 JitPack 主页可查看版本列表和接入信息：
-`https://jitpack.io/#amigo-wangwx/debug-toolkit`
+`debug-toolkit` 已依赖 `network-interceptor`，通常只需一行依赖即可。`<version>` 使用 JitPack 页面或上方 badge 显示的最新版本。
 
 ## 从旧版 FunShorts 本地依赖迁移
 
