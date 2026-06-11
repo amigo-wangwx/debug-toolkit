@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "templateVersion": 2,
+  "selectRuleIds": [
+    "sample-postman-echo"
+  ],
+  "rules": [
+    {
+      "id": "sample-postman-echo",
+      "name": "Sample: debugtoolkit.example -> postman-echo.com",
+      "mappings": [
+        {
+          "source": "https://debugtoolkit.example",
+          "target": "https://postman-echo.com"
+        }
+      ]
+    }
+  ]
+}

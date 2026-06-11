@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+    id 'kotlin-android'
+    id 'com.debugtoolkit.debug-network-interceptor'
+}
+
+android {
+    namespace 'com.debugtoolkit.sample'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.debugtoolkit.sample'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+configurations.configureEach {
+    exclude group: 'com.android.support'
+}
+
+debugNetworkInterceptor {
+    enabled = true
+    logEnabled = true
+    includeDependencies = true
+}
+
+dependencies {
+    debugImplementation libs.okhttp
+    debugImplementation project(':debug-tool:debug-toolkit')
+}

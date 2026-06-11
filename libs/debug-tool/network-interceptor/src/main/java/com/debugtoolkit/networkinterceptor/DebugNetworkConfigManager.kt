@@ -82,6 +82,16 @@ object DebugNetworkConfigManager {
         return updateSelectedRuleIds(selectedRuleIds)
     }
 
+    /**
+     * 设置唯一选中的 rule，清除其他所有选中状态。
+     * ruleId 为 null 时清除所有选中状态。
+     * 只在调用方点击"立即应用"或"应用并重启"时使用，避免即时持久化。
+     */
+    fun setExclusiveSelection(ruleId: String?): Boolean {
+        ensureInitialized()
+        return updateSelectedRuleIds(if (ruleId != null) listOf(ruleId) else emptyList())
+    }
+
     fun applySelectedMappings(): Map<String, String> {
         ensureInitialized()
         val mappings = buildSelectedMappings()

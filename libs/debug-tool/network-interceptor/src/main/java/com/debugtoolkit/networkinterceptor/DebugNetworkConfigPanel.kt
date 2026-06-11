@@ -7,7 +7,8 @@ import android.os.Build
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.CheckBox
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -51,6 +52,8 @@ object DebugNetworkConfigPanel {
             "show panel path=${DebugNetworkConfigManager.getConfigFilePath()} " +
                     "rules=${rules.size} selected=${DebugNetworkConfigManager.getSelectedRuleIds()}"
         )
+        val pendingRuleId = arrayOfNulls<String>(1)
+        pendingRuleId[0] = DebugNetworkConfigManager.getSelectedRuleIds().firstOrNull()
         if (rules.isEmpty()) {
             content.addView(TextView(context).apply {
                 text = "未读取到网络拦截配置，请检查 Download 目录中的 JSON 文件。"
@@ -64,7 +67,9 @@ object DebugNetworkConfigPanel {
                 setTextColor(0xFF222222.toInt())
                 setPadding(0, context.dp(14), 0, context.dp(4))
             })
-            addRuleSelectors(context, content, rules)
+            addRuleSelectors(context, content, rules) { ruleId ->
+                pendingRuleId[0] = ruleId
+            }
         }
 
         lateinit var dialog: AlertDialog
@@ -93,14 +98,16 @@ object DebugNetworkConfigPanel {
             }
         })
         actions.addView(createButton(context, "立即应用") {
+            DebugNetworkConfigManager.setExclusiveSelection(pendingRuleId[0])
             val mappings = DebugNetworkConfigManager.applySelectedMappings()
-            Log.d(TAG, "apply clicked mappings=${mappings.size}")
+            Log.d(TAG, "apply clicked mappings=${mappings.size} selected=${pendingRuleId[0]}")
             Toast.makeText(context, "已应用 ${mappings.size} 条映射", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         })
         actions.addView(createButton(context, "应用并重启") {
+            DebugNetworkConfigManager.setExclusiveSelection(pendingRuleId[0])
             val mappings = DebugNetworkConfigManager.applySelectedMappings()
-            Log.d(TAG, "apply and restart clicked mappings=${mappings.size}")
+            Log.d(TAG, "apply and restart clicked mappings=${mappings.size} selected=${pendingRuleId[0]}")
             dialog.dismiss()
             onRestart()
         })
@@ -116,28 +123,33 @@ object DebugNetworkConfigPanel {
             .setView(scrollView)
             .create()
         prepareOverlayDialog(dialog)
+        dialog.setCanceledOnTouchOutside(true)
         dialog.show()
     }
 
     private fun addRuleSelectors(
         context: Context,
         content: LinearLayout,
-        rules: List<DebugNetworkRule>
+        rules: List<DebugNetworkRule>,
+        onSelectionChanged: (String?) -> Unit
     ) {
-        val selectedRuleIds = DebugNetworkConfigManager.getSelectedRuleIds()
+        val initialSelectedId = DebugNetworkConfigManager.getSelectedRuleIds().firstOrNull()
+        val radioGroup = RadioGroup(context).apply {
+            orientation = RadioGroup.VERTICAL
+        }
         rules.forEach { rule ->
-            content.addView(CheckBox(context).apply {
+            radioGroup.addView(RadioButton(context).apply {
+                id = android.view.View.generateViewId()
                 text = rule.name
-                isChecked = rule.id in selectedRuleIds
+                isChecked = rule.id == initialSelectedId
                 setOnCheckedChangeListener { _, checked ->
-                    val success = DebugNetworkConfigManager.setRuleSelected(rule.id, checked)
-                    Log.d(TAG, "rule checked id=${rule.id} checked=$checked success=$success")
-                    if (!success) {
-                        Toast.makeText(context, "选择状态写入失败", Toast.LENGTH_SHORT).show()
+                    if (checked) {
+                        onSelectionChanged(rule.id)
                     }
                 }
             })
         }
+        content.addView(radioGroup)
     }
 
     private fun createButton(context: Context, text: String, action: () -> Unit): Button {

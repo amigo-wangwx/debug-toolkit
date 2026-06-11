@@ -96,3 +96,15 @@ dependencies {
 ## 许可证
 
 本项目遵循 MIT 许可证，可自由使用和修改。
+
+## 三方库引用
+
+本项目使用和借鉴了以下优秀的开源库和文章。
+
+| 模块 | 三方库 | 地址 | 用途 |
+|---|---|---|---|
+| **network-interceptor** | OkHttp | [square/okhttp](https://github.com/square/okhttp) | HTTP 客户端，UrlRewriter 运行基础 |
+| **debug-toolkit** | Retrofit + Moshi | [square/retrofit](https://github.com/square/retrofit)、[square/moshi](https://github.com/square/moshi) | 调试面板网络请求与 JSON 序列化 |
+| | MMKV | [Tencent/MMKV](https://github.com/Tencent/MMKV) | 本地配置键值存储 |
+| | Logcat | [getActivity/Logcat](https://github.com/getActivity/Logcat) | 日志查看器 |
+| **debug-network-interceptor-plugin** | ASM | [美团技术博客：Java 字节码增强](https://tech.meituan.com/2019/09/05/java-bytecode-enhancement.html) | 字节码注入 OkHttp.Builder 拦截器与 Application.onCreate 非主进程跳过 |

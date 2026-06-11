@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "debug-network-interceptor-plugin"
+rootProject.name = "debug-network-interceptor-plugin-build"
