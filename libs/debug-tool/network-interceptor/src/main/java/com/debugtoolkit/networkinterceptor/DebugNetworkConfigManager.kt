@@ -584,27 +584,91 @@ object DebugNetworkConfigManager {
 
         private fun readTextFromMediaStore(displayName: String): String? {
             val uri = findMediaStoreUri(displayName) ?: return null
+            Log.d(TAG, "read media store uri=$uri path=$displayPath")
             return context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
         }
 
         private fun writeTextToMediaStore(text: String) {
-            val uri = findMediaStoreUri(CONFIG_FILE_NAME) ?: createMediaStoreUri()
+            val uri = findMediaStoreUri(CONFIG_FILE_NAME) ?: createMediaStoreUriOrFindExisting()
+            Log.d(TAG, "write media store uri=$uri path=$displayPath length=${text.length}")
             context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
                 output.write(text.toByteArray(Charsets.UTF_8))
             }
         }
 
+        /**
+         * 查找 Download 配置文件对应的 MediaStore 行。
+         *
+         * 生命周期：每次读取、写入、恢复模板前调用；优先按目标目录匹配，避免命中其他 App 的同名配置。
+         */
         private fun findMediaStoreUri(displayName: String): Uri? {
+            findMediaStoreUriByRelativePath(displayName, relativePath)?.let { return it }
+            findMediaStoreUriByRelativePath(displayName, relativePath.trimEnd('/'))?.let { return it }
+            return findMediaStoreUriInAppDirectory(displayName)
+        }
+
+        /**
+         * 使用 MediaStore 目录字段精确查找配置文件。
+         *
+         * 调用时机：读取或写入前优先调用；同时尝试带尾斜杠和不带尾斜杠，兼容不同系统记录格式。
+         */
+        private fun findMediaStoreUriByRelativePath(displayName: String, targetRelativePath: String): Uri? {
             val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
             val projection = arrayOf(MediaStore.Downloads._ID)
             val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
-            val args = arrayOf(displayName, relativePath)
+            val args = arrayOf(displayName, targetRelativePath)
             context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
                 if (!cursor.moveToFirst()) return null
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                return ContentUris.withAppendedId(collection, id)
+                val uri = ContentUris.withAppendedId(collection, id)
+                Log.d(TAG, "media store hit path=$targetRelativePath uri=$uri")
+                return uri
             }
             return null
+        }
+
+        /**
+         * 在当前 App 目录内查找配置文件。
+         *
+         * 调用时机：精确目录匹配失败后调用；用归一化路径比较，修复尾斜杠差异导致的漏查。
+         */
+        private fun findMediaStoreUriInAppDirectory(displayName: String): Uri? {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.RELATIVE_PATH)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
+            val args = arrayOf(displayName)
+            val targetPath = relativePath.normalizeRelativePath()
+            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val itemPath = cursor
+                        .getString(cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH))
+                        .orEmpty()
+                    if (itemPath.normalizeRelativePath() != targetPath) {
+                        continue
+                    }
+
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    Log.d(TAG, "media store normalized hit path=$itemPath uri=$uri")
+                    return uri
+                }
+            }
+            return null
+        }
+
+        /**
+         * 创建配置文件，创建失败时重新定位已有文件。
+         *
+         * 调用时机：读取不到配置且需要写入模板/恢复模板时调用；同名冲突通常表示文件已存在但前置查询漏命中。
+         */
+        private fun createMediaStoreUriOrFindExisting(): Uri {
+            return runCatching { createMediaStoreUri() }
+                .getOrElse { error ->
+                    Log.d(TAG, "media store create failed, try find existing path=$displayPath", error)
+                    findMediaStoreUri(CONFIG_FILE_NAME)
+                        ?: findMediaStoreUriByDisplayName(CONFIG_FILE_NAME)
+                        ?: throw error
+                }
         }
 
         private fun createMediaStoreUri(): Uri {
@@ -617,9 +681,41 @@ object DebugNetworkConfigManager {
                 ?: error("Failed to create $displayPath")
         }
 
+        /**
+         * 按文件名兜底查找配置文件。
+         *
+         * 调用时机：仅在 MediaStore 创建同名文件失败后使用，尽量保住“重新读取/恢复模板”的自愈能力。
+         */
+        private fun findMediaStoreUriByDisplayName(displayName: String): Uri? {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.RELATIVE_PATH)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
+            val args = arrayOf(displayName)
+            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                val path = cursor
+                    .getString(cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH))
+                    .orEmpty()
+                val uri = ContentUris.withAppendedId(collection, id)
+                Log.d(TAG, "media store display name fallback path=$path uri=$uri")
+                return uri
+            }
+            return null
+        }
+
         private fun legacyFile(fileName: String): File {
             val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             return File(File(downloads, appName), fileName)
+        }
+
+        /**
+         * 归一化 MediaStore 目录路径。
+         *
+         * 调用时机：兜底比较 RELATIVE_PATH 时使用，避免尾斜杠或重复斜杠造成同一目录无法匹配。
+         */
+        private fun String.normalizeRelativePath(): String {
+            return trim().trim('/').replace(Regex("/+"), "/")
         }
 
         private fun Context.readableAppName(): String {
