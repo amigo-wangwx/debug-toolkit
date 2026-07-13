@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -12,6 +13,8 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 object DebugNetworkConfigManager {
     const val ACTION_EDIT_CONFIG = "com.debugtoolkit.networkinterceptor.action.EDIT_CONFIG"
@@ -593,7 +596,7 @@ object DebugNetworkConfigManager {
             Log.d(TAG, "write media store uri=$uri path=$displayPath length=${text.length}")
             context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
                 output.write(text.toByteArray(Charsets.UTF_8))
-            }
+            } ?: error("openOutputStream returned null for $displayPath")
         }
 
         /**
@@ -666,8 +669,9 @@ object DebugNetworkConfigManager {
                 .getOrElse { error ->
                     Log.d(TAG, "media store create failed, try find existing path=$displayPath", error)
                     findMediaStoreUri(CONFIG_FILE_NAME)
+                        ?: scanExistingMediaStoreFile(CONFIG_FILE_NAME)
                         ?: findMediaStoreUriByDisplayName(CONFIG_FILE_NAME)
-                        ?: throw error
+                        ?: throw buildExistingFileUnavailableError(error)
                 }
         }
 
@@ -679,6 +683,42 @@ object DebugNetworkConfigManager {
             }
             return context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: error("Failed to create $displayPath")
+        }
+
+        /**
+         * 扫描磁盘上已存在但 MediaStore 当前不可查的配置文件。
+         *
+         * 调用时机：仅在 insert 因同名物理文件失败后调用；让系统重建索引后再尝试拿可读写 URI。
+         */
+        private fun scanExistingMediaStoreFile(displayName: String): Uri? {
+            val file = legacyFile(displayName)
+            val exists = runCatching { file.exists() }.getOrDefault(false)
+            Log.d(TAG, "media scan start path=${file.absolutePath} exists=$exists")
+
+            val latch = CountDownLatch(1)
+            var scannedUri: Uri? = null
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(file.absolutePath),
+                arrayOf("application/json")
+            ) { path, uri ->
+                scannedUri = uri
+                Log.d(TAG, "media scan completed path=$path uri=$uri")
+                latch.countDown()
+            }
+
+            val completed = runCatching { latch.await(2, TimeUnit.SECONDS) }
+                .getOrElse { error ->
+                    if (error is InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                    Log.d(TAG, "media scan wait failed path=${file.absolutePath}", error)
+                    false
+                }
+            if (!completed) {
+                Log.d(TAG, "media scan timeout path=${file.absolutePath}")
+            }
+            return scannedUri ?: findMediaStoreUri(displayName)
         }
 
         /**
@@ -702,6 +742,19 @@ object DebugNetworkConfigManager {
                 return uri
             }
             return null
+        }
+
+        /**
+         * 构建配置文件存在但当前 App 无法接管时的用户可读错误。
+         *
+         * 调用时机：重新索引和兜底查询都失败后抛出；避免面板只展示 MediaProvider 的底层异常。
+         */
+        private fun buildExistingFileUnavailableError(cause: Throwable): IllegalStateException {
+            return IllegalStateException(
+                "Download 目录中已存在 $displayPath，但当前 App 无法通过 MediaStore 访问。请删除该目录下旧的 " +
+                        "$CONFIG_FILE_NAME 和 $CONFIG_FILE_NAME 的数字副本后，再点击恢复模板配置。",
+                cause
+            )
         }
 
         private fun legacyFile(fileName: String): File {

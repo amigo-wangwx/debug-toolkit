@@ -108,6 +108,7 @@ object DebugConfig {
                 MMKV.defaultMMKV().clearAll()
 
                 // 2. 遍历 mmkv 目录，清除所有自定义 mmapID 的实例
+                var allCleared = true
                 val mmkvDir = File(MMKV.getRootDir())
                 if (mmkvDir.exists() && mmkvDir.isDirectory) {
                     mmkvDir.listFiles()
@@ -119,11 +120,12 @@ object DebugConfig {
                                 MMKV.mmkvWithID(mmapID).clearAll()
                             } catch (e: Exception) {
                                 Log.d(TAG, "clearMMKVData: ${e.message }")
-                                false
+                                // 任一实例失败都要反馈给面板，避免提示全部清理成功。
+                                allCleared = false
                             }
                         }
                 }
-                true
+                allCleared
             } catch (e: Exception) {
                 e.printStackTrace()
                 false

@@ -83,6 +83,19 @@ dependencies {
 
 `debug-toolkit` 已依赖 `network-interceptor`，通常只需一行依赖即可。`<version>` 使用 JitPack 页面或上方 badge 显示的最新版本。
 
+## 网络配置文件
+
+调用方可以在 App 的 source set 根目录放置 `debug_network_config.json`，例如：
+
+```text
+apps/FunShorts/src/funshorts/debug_network_config.json
+apps/ReelRush/src/reelrush/debug_network_config.json
+```
+
+插件只处理 `debug` variant，并按完整 variant、组合 flavor、`debug`、单个 flavor、`main` 的顺序查找当前 variant 对应的配置文件。命中后，插件会把它复制为 App 的生成 asset；没有命中时，不生成 App asset，由 `network-interceptor` 使用 AAR 内置的 `assets/debug_network_config.json`。
+
+运行时统一通过 `context.assets.open("debug_network_config.json")` 读取最终合并进 APK 的文件。配置面板一次最多选择一个 rule；`selectRuleIds` 保持数组格式以兼容已有 JSON，应用时只持久化唯一 rule。
+
 ## 从旧版 FunShorts 本地依赖迁移
 
 如果之前是通过 `includeBuild` 和 `project()` 本地引用，可按以下步骤切换到远程依赖：

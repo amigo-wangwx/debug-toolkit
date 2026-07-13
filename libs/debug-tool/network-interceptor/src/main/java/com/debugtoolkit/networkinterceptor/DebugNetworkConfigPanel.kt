@@ -20,7 +20,7 @@ object DebugNetworkConfigPanel {
      *
      * 这个 UI 放在底层网络拦截库中，debug-toolkit 浮窗只需要调用 show()：
      * - JSON 配置文件读取路径、模板升级、selectRuleIds 选择状态、最终 mappings 都由 DebugNetworkConfigManager 管理。
-     * - 每个 rule 是一套可独立应用的映射集合；勾选多个 rule 时会把它们的 mappings 合并后应用。
+     * - 每个 rule 是一套可独立应用的映射集合；配置面板一次只选择并应用一个 rule。
      * - onRestart 由宿主调试工具传入，因为只有宿主调试工具知道如何重启当前 App。
      */
     fun show(context: Context, onRestart: () -> Unit = {}) {

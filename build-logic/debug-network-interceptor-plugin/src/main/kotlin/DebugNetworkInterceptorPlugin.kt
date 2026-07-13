@@ -305,9 +305,8 @@ private fun Project.findVariantDebugNetworkConfigFile(
         }
     }
 
-    return srcDir.walkTopDown()
-        .firstOrNull { file -> file.isFile && file.name == DEBUG_NETWORK_CONFIG_FILE_NAME }
-        ?.let { file -> layout.projectDirectory.file(file.relativeTo(projectDir).path) }
+    // 当前 variant 没有对应配置时使用库内置 asset，避免误拿其他 App 或 flavor 的同名文件。
+    return null
 }
 
 private fun buildDebugConfigSourceSetNames(

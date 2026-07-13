@@ -30,10 +30,8 @@ import android.widget.EditText
 import android.widget.GridView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.debugtoolkit.networkinterceptor.DebugNetworkConfigPanel
-import kotlin.system.exitProcess
 
 class DebugFloatingWindowService : Service() {
 
@@ -63,7 +61,6 @@ class DebugFloatingWindowService : Service() {
         private const val REQUEST_CODE_RESTART = 10086
     }
 
-    @RequiresApi(Build.VERSION_CODES.M)
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -74,7 +71,9 @@ class DebugFloatingWindowService : Service() {
 
         // 使用 Handler 延迟检查，确保服务初始化完成
         Handler(Looper.getMainLooper()).post {
-            if (Settings.canDrawOverlays(this)) {
+            val canDrawOverlays = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                    Settings.canDrawOverlays(this)
+            if (canDrawOverlays) {
                 showFloatingWindow()
             } else {
                 requestOverlayPermission()
@@ -106,7 +105,6 @@ class DebugFloatingWindowService : Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
     private fun showFloatingWindow() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_debug_floating_window, null)
@@ -219,7 +217,6 @@ class DebugFloatingWindowService : Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
     @SuppressLint("ClickableViewAccessibility")
     private fun setupDragListener() {
         // 获取系统推荐触摸阈值
@@ -267,11 +264,18 @@ class DebugFloatingWindowService : Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
     private fun snapToEdge(view: View) {
-        val windowMetrics = windowManager.currentWindowMetrics
-        val bounds = windowMetrics.bounds
-        val screenWidth = bounds.width()
+        val screenWidth: Int
+        val screenHeight: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            screenWidth = bounds.width()
+            screenHeight = bounds.height()
+        } else {
+            // Android 10 及以下没有 WindowMetrics，使用兼容的屏幕尺寸避免拖拽松手时崩溃。
+            screenWidth = resources.displayMetrics.widthPixels
+            screenHeight = resources.displayMetrics.heightPixels
+        }
 
         // 简化：始终操作 Window 坐标
         val currentX = layoutParams?.x?.toFloat() ?: 0f
@@ -286,7 +290,7 @@ class DebugFloatingWindowService : Service() {
             (screenWidth - viewWidth).toFloat()
         }
 
-        val targetY = currentY.coerceAtLeast(0f).coerceAtMost(bounds.height().toFloat() - viewHeight)
+        val targetY = currentY.coerceAtLeast(0f).coerceAtMost(screenHeight.toFloat() - viewHeight)
 
         // 瞬移窗口位置
         layoutParams?.x = targetX.toInt()
@@ -308,33 +312,44 @@ class DebugFloatingWindowService : Service() {
 
     /**
      * 重启原理：
-     * 1. 直接 startActivity(CLEAR_TASK) 拉起新的启动页
-     * 2. 延迟 300ms 后 killProcess 杀掉旧进程
+     * 1. 通过 AlarmManager 安排启动新的入口页。
+     * 2. 结束旧进程，由系统在下一次 alarm 触发时创建新进程。
      *
-     * 不使用 AlarmManager，避免精确闹钟权限问题
+     * 使用普通 alarm，不依赖精确闹钟权限。
      */
     private fun restartApp() {
         try {
-            // 先移除悬浮窗
-            try { windowManager.removeView(floatingView) } catch (_: Exception) {}
-
             val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             if (launchIntent == null) {
                 Toast.makeText(this, "无法获取启动Intent", Toast.LENGTH_SHORT).show()
                 return
             }
-            // CLEAR_TASK: 销毁所有现有 Activity 栈
             launchIntent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             )
-            startActivity(launchIntent)
+            val pendingIntentFlags = PendingIntent.FLAG_CANCEL_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            val restartIntent = PendingIntent.getActivity(
+                this,
+                REQUEST_CODE_RESTART,
+                launchIntent,
+                pendingIntentFlags
+            )
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            // 使用普通 alarm 即可完成进程外重启，不要求精确闹钟权限。
+            alarmManager.set(
+                AlarmManager.ELAPSED_REALTIME,
+                SystemClock.elapsedRealtime() + 500L,
+                restartIntent
+            )
 
             Toast.makeText(this, "重启中，请稍后", Toast.LENGTH_LONG).show()
 
-            // 延迟杀进程，确保新 Activity 已创建
-            // Handler(Looper.getMainLooper()).postDelayed({
-                android.os.Process.killProcess(android.os.Process.myPid())
-            // }, 1000)
+            try {
+                windowManager.removeView(floatingView)
+            } catch (_: Exception) {
+            }
+            android.os.Process.killProcess(android.os.Process.myPid())
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "重启失败: ${e.message}", Toast.LENGTH_SHORT).show()

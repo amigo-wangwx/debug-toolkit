@@ -46,7 +46,9 @@ class DebugInitProvider : ContentProvider() {
             (context.applicationContext as Application).registerActivityLifecycleCallbacks(
                 object : Application.ActivityLifecycleCallbacks {
                     override fun onActivityResumed(activity: Activity) {
-                        if (Settings.canDrawOverlays(activity)) {
+                        val canDrawOverlays = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                                Settings.canDrawOverlays(activity)
+                        if (canDrawOverlays) {
                             tryStartService(activity)
                             (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(this)
                         } else {
