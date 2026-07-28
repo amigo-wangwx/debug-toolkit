@@ -21,9 +21,13 @@ object DebugNetworkConfigPanel {
      * 这个 UI 放在底层网络拦截库中，debug-toolkit 浮窗只需要调用 show()：
      * - JSON 配置文件读取路径、模板升级、selectRuleIds 选择状态、最终 mappings 都由 DebugNetworkConfigManager 管理。
      * - 每个 rule 是一套可独立应用的映射集合；配置面板一次只选择并应用一个 rule。
-     * - onRestart 由宿主调试工具传入，因为只有宿主调试工具知道如何重启当前 App。
+     * - onRestart 和 onEditorOpened 由宿主调试工具传入，因为只有宿主调试工具知道如何重启或收起浮窗菜单。
      */
-    fun show(context: Context, onRestart: () -> Unit = {}) {
+    fun show(
+        context: Context,
+        onRestart: () -> Unit = {},
+        onEditorOpened: () -> Unit = {}
+    ) {
         DebugNetworkConfigManager.init(context)
 
         val content = LinearLayout(context).apply {
@@ -56,7 +60,7 @@ object DebugNetworkConfigPanel {
         pendingRuleId[0] = DebugNetworkConfigManager.getSelectedRuleIds().firstOrNull()
         if (rules.isEmpty()) {
             content.addView(TextView(context).apply {
-                text = "未读取到网络拦截配置，请检查 Download 目录中的 JSON 文件。"
+                text = "未读取到网络拦截配置，请检查当前配置文件或通过编辑器导入 JSON。"
                 textSize = 14f
                 setPadding(0, context.dp(12), 0, context.dp(12))
             })
@@ -95,6 +99,9 @@ object DebugNetworkConfigPanel {
             Log.d(TAG, "open editor clicked started=$started")
             if (!started) {
                 Toast.makeText(context, "无法打开配置编辑器", Toast.LENGTH_SHORT).show()
+            } else {
+                dialog.dismiss()
+                onEditorOpened()
             }
         })
         actions.addView(createButton(context, "立即应用") {
@@ -162,7 +169,7 @@ object DebugNetworkConfigPanel {
     private fun showResetConfirm(context: Context, parentDialog: AlertDialog, onRestart: () -> Unit) {
         val confirmDialog = AlertDialog.Builder(context)
             .setTitle("恢复模板配置")
-            .setMessage("会覆盖 Download 目录中的 debug_network_config.json，已手动修改的映射关系会丢失。确定继续吗？")
+            .setMessage("会覆盖当前生效的 debug_network_config.json，已手动修改的映射关系会丢失。确定继续吗？")
             .setPositiveButton("确定") { dialog, _ ->
                 val success = DebugNetworkConfigManager.resetConfigToTemplate()
                 Log.d(TAG, "reset template confirmed success=$success")

@@ -1,20 +1,11 @@
 package com.debugtoolkit.networkinterceptor
 
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ApplicationInfo
-import android.media.MediaScannerConnection
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 object DebugNetworkConfigManager {
     const val ACTION_EDIT_CONFIG = "com.debugtoolkit.networkinterceptor.action.EDIT_CONFIG"
@@ -23,8 +14,6 @@ object DebugNetworkConfigManager {
     private const val TAG = "DebugNetwork-Config"
     private const val TEMPLATE_ASSET_NAME = "debug_network_config.json"
     private const val CONFIG_FILE_NAME = "debug_network_config.json"
-    private const val LEGACY_CONFIG_FILE_NAME = "debug_network_config.txt"
-    private const val DOWNLOAD_DIR = "Download"
 
     @Volatile
     private var config: DebugNetworkConfig = DebugNetworkConfig(1, 0, emptyList(), emptyList())
@@ -111,9 +100,11 @@ object DebugNetworkConfigManager {
             configFilePath = external.displayPath
             log("reload config start path=$configFilePath")
             val configJson = external.ensureConfigFile(templateJson)
+            configFilePath = external.displayPath
             val mergedJson = mergeTemplateIfNeeded(configJson, templateJson)
             if (mergedJson.toString() != configJson.toString()) {
                 external.writeText(mergedJson.toString(2))
+                configFilePath = external.displayPath
                 log(
                     "template merged path=$configFilePath " +
                             "templateVersion=${mergedJson.optInt("templateVersion", 0)}"
@@ -139,8 +130,8 @@ object DebugNetworkConfigManager {
         return runCatching {
             val templateJson = readTemplateJson(context)
             val external = ExternalConfigFile(context)
-            configFilePath = external.displayPath
             external.writeText(templateJson.toString(2))
+            configFilePath = external.displayPath
             config = parseConfig(templateJson)
             lastError = null
             log("config reset to template path=$configFilePath rules=${config.rules.size}")
@@ -157,9 +148,9 @@ object DebugNetworkConfigManager {
         return runCatching {
             val templateJson = readTemplateJson(context)
             val external = ExternalConfigFile(context)
-            configFilePath = external.displayPath
             val configJson = external.ensureConfigFile(templateJson)
             val text = mergeTemplateIfNeeded(configJson, templateJson).toString(2)
+            configFilePath = external.displayPath
             lastError = null
             log("config text read path=$configFilePath length=${text.length}")
             text
@@ -176,8 +167,8 @@ object DebugNetworkConfigManager {
             val configJson = JSONObject(text)
             val parsedConfig = parseConfig(configJson)
             val external = ExternalConfigFile(context)
-            configFilePath = external.displayPath
             external.writeText(configJson.toString(2))
+            configFilePath = external.displayPath
             config = parsedConfig
             lastError = null
             log(
@@ -217,6 +208,7 @@ object DebugNetworkConfigManager {
             val mergedJson = mergeTemplateIfNeeded(currentJson, templateJson)
             mergedJson.put("selectRuleIds", selectedRuleIds.toJsonArray())
             external.writeText(mergedJson.toString(2))
+            configFilePath = external.displayPath
             lastError = null
             log("selection persisted path=$configFilePath selected=$selectedRuleIds")
             true
@@ -530,27 +522,16 @@ object DebugNetworkConfigManager {
     }
 
     private class ExternalConfigFile(private val context: Context) {
-        private val appName = context.readableAppName()
-        private val relativePath = "$DOWNLOAD_DIR/$appName/"
+        private val file = File(context.getConfigDirectory(), CONFIG_FILE_NAME)
 
-        val displayPath: String = "$relativePath$CONFIG_FILE_NAME"
+        val displayPath: String
+            get() = file.absolutePath
 
         fun ensureConfigFile(templateJson: JSONObject): JSONObject {
             val currentText = readText()
             if (currentText != null) {
                 Log.d(TAG, "config file found path=$displayPath length=${currentText.length}")
                 return JSONObject(currentText)
-            }
-
-            val legacyText = readLegacyText()
-            if (legacyText != null) {
-                writeText(legacyText)
-                Log.d(
-                    TAG,
-                    "legacy config migrated from $LEGACY_CONFIG_FILE_NAME to $CONFIG_FILE_NAME " +
-                            "path=$displayPath length=${legacyText.length}"
-                )
-                return JSONObject(legacyText)
             }
 
             val templateText = templateJson.toString(2)
@@ -560,222 +541,16 @@ object DebugNetworkConfigManager {
         }
 
         fun readText(): String? {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                readTextFromMediaStore(CONFIG_FILE_NAME)
-            } else {
-                legacyFile(CONFIG_FILE_NAME).takeIf { it.exists() }?.readText()
-            }
-        }
-
-        fun readLegacyText(): String? {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                readTextFromMediaStore(LEGACY_CONFIG_FILE_NAME)
-            } else {
-                legacyFile(LEGACY_CONFIG_FILE_NAME).takeIf { it.exists() }?.readText()
-            }
+            return file.takeIf { it.exists() }?.readText()
         }
 
         fun writeText(text: String) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeTextToMediaStore(text)
-            } else {
-                val file = legacyFile(CONFIG_FILE_NAME)
-                file.parentFile?.mkdirs()
-                file.writeText(text)
-            }
+            file.parentFile?.mkdirs()
+            file.writeText(text)
         }
 
-        private fun readTextFromMediaStore(displayName: String): String? {
-            val uri = findMediaStoreUri(displayName) ?: return null
-            Log.d(TAG, "read media store uri=$uri path=$displayPath")
-            return context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-        }
-
-        private fun writeTextToMediaStore(text: String) {
-            val uri = findMediaStoreUri(CONFIG_FILE_NAME) ?: createMediaStoreUriOrFindExisting()
-            Log.d(TAG, "write media store uri=$uri path=$displayPath length=${text.length}")
-            context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                output.write(text.toByteArray(Charsets.UTF_8))
-            } ?: error("openOutputStream returned null for $displayPath")
-        }
-
-        /**
-         * 查找 Download 配置文件对应的 MediaStore 行。
-         *
-         * 生命周期：每次读取、写入、恢复模板前调用；优先按目标目录匹配，避免命中其他 App 的同名配置。
-         */
-        private fun findMediaStoreUri(displayName: String): Uri? {
-            findMediaStoreUriByRelativePath(displayName, relativePath)?.let { return it }
-            findMediaStoreUriByRelativePath(displayName, relativePath.trimEnd('/'))?.let { return it }
-            return findMediaStoreUriInAppDirectory(displayName)
-        }
-
-        /**
-         * 使用 MediaStore 目录字段精确查找配置文件。
-         *
-         * 调用时机：读取或写入前优先调用；同时尝试带尾斜杠和不带尾斜杠，兼容不同系统记录格式。
-         */
-        private fun findMediaStoreUriByRelativePath(displayName: String, targetRelativePath: String): Uri? {
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(MediaStore.Downloads._ID)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
-            val args = arrayOf(displayName, targetRelativePath)
-            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                if (!cursor.moveToFirst()) return null
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                val uri = ContentUris.withAppendedId(collection, id)
-                Log.d(TAG, "media store hit path=$targetRelativePath uri=$uri")
-                return uri
-            }
-            return null
-        }
-
-        /**
-         * 在当前 App 目录内查找配置文件。
-         *
-         * 调用时机：精确目录匹配失败后调用；用归一化路径比较，修复尾斜杠差异导致的漏查。
-         */
-        private fun findMediaStoreUriInAppDirectory(displayName: String): Uri? {
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.RELATIVE_PATH)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
-            val args = arrayOf(displayName)
-            val targetPath = relativePath.normalizeRelativePath()
-            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val itemPath = cursor
-                        .getString(cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH))
-                        .orEmpty()
-                    if (itemPath.normalizeRelativePath() != targetPath) {
-                        continue
-                    }
-
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    Log.d(TAG, "media store normalized hit path=$itemPath uri=$uri")
-                    return uri
-                }
-            }
-            return null
-        }
-
-        /**
-         * 创建配置文件，创建失败时重新定位已有文件。
-         *
-         * 调用时机：读取不到配置且需要写入模板/恢复模板时调用；同名冲突通常表示文件已存在但前置查询漏命中。
-         */
-        private fun createMediaStoreUriOrFindExisting(): Uri {
-            return runCatching { createMediaStoreUri() }
-                .getOrElse { error ->
-                    Log.d(TAG, "media store create failed, try find existing path=$displayPath", error)
-                    findMediaStoreUri(CONFIG_FILE_NAME)
-                        ?: scanExistingMediaStoreFile(CONFIG_FILE_NAME)
-                        ?: findMediaStoreUriByDisplayName(CONFIG_FILE_NAME)
-                        ?: throw buildExistingFileUnavailableError(error)
-                }
-        }
-
-        private fun createMediaStoreUri(): Uri {
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, CONFIG_FILE_NAME)
-                put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
-            }
-            return context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: error("Failed to create $displayPath")
-        }
-
-        /**
-         * 扫描磁盘上已存在但 MediaStore 当前不可查的配置文件。
-         *
-         * 调用时机：仅在 insert 因同名物理文件失败后调用；让系统重建索引后再尝试拿可读写 URI。
-         */
-        private fun scanExistingMediaStoreFile(displayName: String): Uri? {
-            val file = legacyFile(displayName)
-            val exists = runCatching { file.exists() }.getOrDefault(false)
-            Log.d(TAG, "media scan start path=${file.absolutePath} exists=$exists")
-
-            val latch = CountDownLatch(1)
-            var scannedUri: Uri? = null
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(file.absolutePath),
-                arrayOf("application/json")
-            ) { path, uri ->
-                scannedUri = uri
-                Log.d(TAG, "media scan completed path=$path uri=$uri")
-                latch.countDown()
-            }
-
-            val completed = runCatching { latch.await(2, TimeUnit.SECONDS) }
-                .getOrElse { error ->
-                    if (error is InterruptedException) {
-                        Thread.currentThread().interrupt()
-                    }
-                    Log.d(TAG, "media scan wait failed path=${file.absolutePath}", error)
-                    false
-                }
-            if (!completed) {
-                Log.d(TAG, "media scan timeout path=${file.absolutePath}")
-            }
-            return scannedUri ?: findMediaStoreUri(displayName)
-        }
-
-        /**
-         * 按文件名兜底查找配置文件。
-         *
-         * 调用时机：仅在 MediaStore 创建同名文件失败后使用，尽量保住“重新读取/恢复模板”的自愈能力。
-         */
-        private fun findMediaStoreUriByDisplayName(displayName: String): Uri? {
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.RELATIVE_PATH)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
-            val args = arrayOf(displayName)
-            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                if (!cursor.moveToFirst()) return null
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                val path = cursor
-                    .getString(cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH))
-                    .orEmpty()
-                val uri = ContentUris.withAppendedId(collection, id)
-                Log.d(TAG, "media store display name fallback path=$path uri=$uri")
-                return uri
-            }
-            return null
-        }
-
-        /**
-         * 构建配置文件存在但当前 App 无法接管时的用户可读错误。
-         *
-         * 调用时机：重新索引和兜底查询都失败后抛出；避免面板只展示 MediaProvider 的底层异常。
-         */
-        private fun buildExistingFileUnavailableError(cause: Throwable): IllegalStateException {
-            return IllegalStateException(
-                "Download 目录中已存在 $displayPath，但当前 App 无法通过 MediaStore 访问。请删除该目录下旧的 " +
-                        "$CONFIG_FILE_NAME 和 $CONFIG_FILE_NAME 的数字副本后，再点击恢复模板配置。",
-                cause
-            )
-        }
-
-        private fun legacyFile(fileName: String): File {
-            val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            return File(File(downloads, appName), fileName)
-        }
-
-        /**
-         * 归一化 MediaStore 目录路径。
-         *
-         * 调用时机：兜底比较 RELATIVE_PATH 时使用，避免尾斜杠或重复斜杠造成同一目录无法匹配。
-         */
-        private fun String.normalizeRelativePath(): String {
-            return trim().trim('/').replace(Regex("/+"), "/")
-        }
-
-        private fun Context.readableAppName(): String {
-            val label = runCatching {
-                packageManager.getApplicationLabel(applicationInfo).toString()
-            }.getOrDefault(packageName)
-            return label.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { packageName }
+        private fun Context.getConfigDirectory(): File {
+            return getExternalFilesDir(null) ?: filesDir
         }
     }
 

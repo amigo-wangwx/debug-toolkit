@@ -59,6 +59,7 @@ class DebugFloatingWindowService : Service() {
 
     companion object {
         private const val REQUEST_CODE_RESTART = 10086
+        private const val META_DATA_DEEPLINK_SCHEME = "debugtoolkit.deeplink.scheme"
     }
 
     override fun onCreate() {
@@ -399,6 +400,35 @@ class DebugFloatingWindowService : Service() {
         toggleMenu()
     }
 
+    private fun buildDebugDeepLink(path: String): String {
+        return "${getDebugDeepLinkScheme()}://$path"
+    }
+
+    private fun getDebugDeepLinkScheme(): String {
+        val configuredScheme = runCatching {
+            packageManager
+                .getApplicationInfo(packageName, android.content.pm.PackageManager.GET_META_DATA)
+                .metaData
+                ?.getString(META_DATA_DEEPLINK_SCHEME)
+                .orEmpty()
+        }.getOrDefault("")
+
+        return configuredScheme.sanitizeScheme()
+            .ifEmpty { getReadableAppName().sanitizeScheme() }
+            .ifEmpty { packageName.substringAfterLast('.').sanitizeScheme() }
+            .ifEmpty { "app" }
+    }
+
+    private fun getReadableAppName(): String {
+        return runCatching {
+            packageManager.getApplicationLabel(applicationInfo).toString()
+        }.getOrDefault("")
+    }
+
+    private fun String.sanitizeScheme(): String {
+        return lowercase().filter { it in 'a'..'z' || it in '0'..'9' || it == '+' || it == '.' || it == '-' }
+    }
+
     // ==================== UI 权限与通知 ====================
 
     private fun requestOverlayPermission() {
@@ -496,7 +526,11 @@ class DebugFloatingWindowService : Service() {
                 clearMMKVData()
             },
             ButtonItem("网络", R.drawable.ic_search, "#607D8B") {
-                DebugNetworkConfigPanel.show(this) { restartApp() }
+                DebugNetworkConfigPanel.show(
+                    context = this,
+                    onRestart = { restartApp() },
+                    onEditorOpened = { toggleMenu() }
+                )
             },
             // 第四行（归因测试 - 模拟真实 AF/HTM 归因回调链路）
             ButtonItem("AF→短剧", R.drawable.ic_search, "#E91E63") {
@@ -506,11 +540,17 @@ class DebugFloatingWindowService : Service() {
                 mockAttributionFromApp("debugMockAFAttribution", "applovin_novel_456_0__debug__001")
             },
             ButtonItem("HTM→短剧", R.drawable.ic_search, "#009688") {
-                mockAttributionFromApp("debugMockHTMAttribution", "funshorts://navigator/video/player/123/0")
+                mockAttributionFromApp(
+                    "debugMockHTMAttribution",
+                    buildDebugDeepLink("navigator/video/player/123/0")
+                )
             },
             // 第五行（归因测试续）
             ButtonItem("HTM→小说", R.drawable.ic_search, "#795548") {
-                mockAttributionFromApp("debugMockHTMAttribution", "funshorts://navigator/novel/read/456/0")
+                mockAttributionFromApp(
+                    "debugMockHTMAttribution",
+                    buildDebugDeepLink("navigator/novel/read/456/0")
+                )
             },
             ButtonItem("重置归因", R.drawable.ic_search, "#FF9800") {
                 resetAttributionFromApp()
