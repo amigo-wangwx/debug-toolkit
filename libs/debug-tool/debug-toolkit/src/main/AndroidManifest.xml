@@ -15,7 +15,7 @@
             android:multiprocess="false" />
 
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name=".DebugToolkitFileProvider"
             android:authorities="${applicationId}.debugtoolkit.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
