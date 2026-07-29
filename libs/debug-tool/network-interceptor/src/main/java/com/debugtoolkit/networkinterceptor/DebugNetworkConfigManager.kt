@@ -3,6 +3,8 @@ package com.debugtoolkit.networkinterceptor
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -92,6 +94,66 @@ object DebugNetworkConfigManager {
         return mappings
     }
 
+    fun previewRewrite(url: String, ruleId: String?): DebugNetworkRewritePreview {
+        ensureInitialized()
+        val originalUrl = url.trim().toHttpUrlOrNull()
+        if (originalUrl == null) {
+            return DebugNetworkRewritePreview(
+                inputUrl = url,
+                ruleId = ruleId,
+                hit = false,
+                reason = "请输入完整合法 URL"
+            )
+        }
+
+        val rule = ruleId?.let { id -> config.rules.firstOrNull { it.id == id } }
+        if (ruleId != null && rule == null) {
+            return DebugNetworkRewritePreview(
+                inputUrl = url,
+                ruleId = ruleId,
+                hit = false,
+                reason = "未找到选中的 rule: $ruleId"
+            )
+        }
+
+        val mappings = rule?.mappings.orEmpty()
+        if (mappings.isEmpty()) {
+            return DebugNetworkRewritePreview(
+                inputUrl = url,
+                ruleId = ruleId,
+                ruleName = rule?.name,
+                hit = false,
+                reason = if (ruleId == null) "未选择 rule" else "当前 rule 没有可用 mappings"
+            )
+        }
+
+        val rewriteRules = mappings.mapNotNull { mapping ->
+            DebugNetworkPreviewRule.create(mapping)
+        }.sortedWith(DebugNetworkPreviewRule.MATCH_PRIORITY)
+
+        val rewriteRule = rewriteRules.firstOrNull { it.matches(originalUrl) }
+        if (rewriteRule == null) {
+            return DebugNetworkRewritePreview(
+                inputUrl = url,
+                ruleId = ruleId,
+                ruleName = rule?.name,
+                hit = false,
+                reason = "未命中当前 rule 的 mappings"
+            )
+        }
+
+        val rewrittenUrl = rewriteRule.rewrite(originalUrl).toString()
+        return DebugNetworkRewritePreview(
+            inputUrl = url,
+            ruleId = ruleId,
+            ruleName = rule?.name,
+            hit = true,
+            source = rewriteRule.mapping.source,
+            target = rewriteRule.mapping.target,
+            rewrittenUrl = rewrittenUrl
+        )
+    }
+
     fun reloadConfigFromFile(): Boolean {
         val context = appContext ?: return false
         return runCatching {
@@ -165,6 +227,18 @@ object DebugNetworkConfigManager {
         val context = appContext ?: return false
         return runCatching {
             val configJson = JSONObject(text)
+            val validation = DebugNetworkConfigValidator.validate(configJson)
+            if (!validation.isValid) {
+                lastError = validation.summary
+                DebugOperationLog.record(
+                    category = "network",
+                    action = "validate_config",
+                    message = "path=${validation.firstErrorPath} error=${validation.firstError}",
+                    success = false
+                )
+                log("config validation failed first=${validation.firstError}")
+                return false
+            }
             val parsedConfig = parseConfig(configJson)
             val external = ExternalConfigFile(context)
             external.writeText(configJson.toString(2))
@@ -569,5 +643,56 @@ object DebugNetworkConfigManager {
 
     private fun logError(message: String, error: Throwable) {
         Log.e(TAG, "$message: ${error.message ?: error.javaClass.simpleName}", error)
+    }
+
+    private data class DebugNetworkPreviewRule(
+        val mapping: DebugNetworkMapping,
+        val source: DebugNetworkBaseUrlParser.ParsedBaseUrl,
+        val target: DebugNetworkBaseUrlParser.ParsedBaseUrl
+    ) {
+        fun matches(url: HttpUrl): Boolean {
+            if (source.scheme != null && source.scheme != url.scheme) return false
+            if (source.url.host != url.host) return false
+            if (source.port != null && source.port != url.port) return false
+            return DebugNetworkBaseUrlParser.isPathPrefixMatch(
+                DebugNetworkBaseUrlParser.normalizeEncodedPath(source.encodedPath),
+                url.encodedPath
+            )
+        }
+
+        fun rewrite(url: HttpUrl): HttpUrl {
+            val sourcePath = DebugNetworkBaseUrlParser.normalizeEncodedPath(source.encodedPath)
+            val targetPath = DebugNetworkBaseUrlParser.normalizeEncodedPath(target.encodedPath)
+            val remainPath = when (sourcePath) {
+                "/" -> url.encodedPath
+                url.encodedPath -> ""
+                else -> url.encodedPath.removePrefix(sourcePath)
+            }
+            val newScheme = target.scheme ?: url.scheme
+            return url.newBuilder()
+                .scheme(newScheme)
+                .host(target.url.host)
+                .port(target.port ?: HttpUrl.defaultPort(newScheme))
+                .encodedPath(DebugNetworkBaseUrlParser.mergeEncodedPath(targetPath, remainPath))
+                .build()
+        }
+
+        companion object {
+            val MATCH_PRIORITY = compareByDescending<DebugNetworkPreviewRule> { rule ->
+                listOfNotNull(
+                    rule.source.scheme,
+                    rule.source.port,
+                    rule.source.encodedPath.takeIf { it != "/" }
+                ).size
+            }.thenByDescending { rule ->
+                DebugNetworkBaseUrlParser.normalizeEncodedPath(rule.source.encodedPath).length
+            }
+
+            fun create(mapping: DebugNetworkMapping): DebugNetworkPreviewRule? {
+                val source = DebugNetworkBaseUrlParser.parse(mapping.source) ?: return null
+                val target = DebugNetworkBaseUrlParser.parse(mapping.target) ?: return null
+                return DebugNetworkPreviewRule(mapping, source, target)
+            }
+        }
     }
 }

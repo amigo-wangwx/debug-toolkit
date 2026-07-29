@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.LinearLayout
@@ -29,6 +30,11 @@ object DebugNetworkConfigPanel {
         onEditorOpened: () -> Unit = {}
     ) {
         DebugNetworkConfigManager.init(context)
+        DebugOperationLog.record(
+            category = "network",
+            action = "panel_open",
+            message = "path=${DebugNetworkConfigManager.getConfigFilePath()}"
+        )
 
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -58,6 +64,7 @@ object DebugNetworkConfigPanel {
         )
         val pendingRuleId = arrayOfNulls<String>(1)
         pendingRuleId[0] = DebugNetworkConfigManager.getSelectedRuleIds().firstOrNull()
+        lateinit var previewResultView: TextView
         if (rules.isEmpty()) {
             content.addView(TextView(context).apply {
                 text = "未读取到网络拦截配置，请检查当前配置文件或通过编辑器导入 JSON。"
@@ -74,6 +81,38 @@ object DebugNetworkConfigPanel {
             addRuleSelectors(context, content, rules) { ruleId ->
                 pendingRuleId[0] = ruleId
             }
+            content.addView(TextView(context).apply {
+                text = "URL 命中预览"
+                textSize = 15f
+                setTextColor(0xFF222222.toInt())
+                setPadding(0, context.dp(14), 0, context.dp(4))
+            })
+            val previewInput = EditText(context).apply {
+                hint = "输入完整 URL"
+                setSingleLine(true)
+                textSize = 13f
+            }
+            content.addView(previewInput)
+            previewResultView = TextView(context).apply {
+                textSize = 12f
+                setTextColor(0xFF666666.toInt())
+                setPadding(0, context.dp(6), 0, 0)
+            }
+            content.addView(previewResultView)
+            content.addView(createButton(context, "预览") {
+                val preview = DebugNetworkConfigManager.previewRewrite(
+                    url = previewInput.text.toString(),
+                    ruleId = pendingRuleId[0]
+                )
+                DebugOperationLog.record(
+                    category = "network",
+                    action = "preview_url",
+                    message = "ruleId=${pendingRuleId[0]} hit=${preview.hit} reason=${preview.reason}",
+                    success = preview.hit
+                )
+                previewResultView.text = preview.toDisplayText()
+                previewResultView.setTextColor(if (preview.hit) 0xFF2E7D32.toInt() else 0xFFD32F2F.toInt())
+            })
         }
 
         lateinit var dialog: AlertDialog
@@ -83,10 +122,11 @@ object DebugNetworkConfigPanel {
         }
         actions.addView(createButton(context, "重新读取配置") {
             val success = DebugNetworkConfigManager.reloadConfigFromFile()
+            DebugOperationLog.record("network", "reload_config", success = success)
             Log.d(TAG, "reload config clicked success=$success")
             Toast.makeText(context, if (success) "配置已重新读取" else "配置读取失败", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
-            show(context, onRestart)
+            show(context, onRestart, onEditorOpened)
         })
         actions.addView(createButton(context, "编辑配置") {
             val intent = Intent(DebugNetworkConfigManager.ACTION_EDIT_CONFIG).apply {
@@ -96,6 +136,7 @@ object DebugNetworkConfigPanel {
             val started = runCatching { context.startActivity(intent) }
                 .onFailure { error -> Log.e(TAG, "open editor failed", error) }
                 .isSuccess
+            DebugOperationLog.record("network", "open_editor", success = started)
             Log.d(TAG, "open editor clicked started=$started")
             if (!started) {
                 Toast.makeText(context, "无法打开配置编辑器", Toast.LENGTH_SHORT).show()
@@ -107,6 +148,12 @@ object DebugNetworkConfigPanel {
         actions.addView(createButton(context, "立即应用") {
             DebugNetworkConfigManager.setExclusiveSelection(pendingRuleId[0])
             val mappings = DebugNetworkConfigManager.applySelectedMappings()
+            DebugOperationLog.record(
+                category = "network",
+                action = "apply",
+                message = "selected=${pendingRuleId[0]} mappings=${mappings.size}",
+                success = true
+            )
             Log.d(TAG, "apply clicked mappings=${mappings.size} selected=${pendingRuleId[0]}")
             Toast.makeText(context, "已应用 ${mappings.size} 条映射", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
@@ -114,13 +161,20 @@ object DebugNetworkConfigPanel {
         actions.addView(createButton(context, "应用并重启") {
             DebugNetworkConfigManager.setExclusiveSelection(pendingRuleId[0])
             val mappings = DebugNetworkConfigManager.applySelectedMappings()
+            DebugOperationLog.record(
+                category = "network",
+                action = "apply_and_restart",
+                message = "selected=${pendingRuleId[0]} mappings=${mappings.size}",
+                success = true
+            )
             Log.d(TAG, "apply and restart clicked mappings=${mappings.size} selected=${pendingRuleId[0]}")
             dialog.dismiss()
             onRestart()
         })
         actions.addView(createButton(context, "恢复模板配置") {
+            DebugOperationLog.record("network", "reset_template_request")
             Log.d(TAG, "reset template clicked")
-            showResetConfirm(context, dialog, onRestart)
+            showResetConfirm(context, dialog, onRestart, onEditorOpened)
         })
         content.addView(actions)
 
@@ -166,17 +220,35 @@ object DebugNetworkConfigPanel {
         }
     }
 
-    private fun showResetConfirm(context: Context, parentDialog: AlertDialog, onRestart: () -> Unit) {
+    private fun DebugNetworkRewritePreview.toDisplayText(): String {
+        if (!hit) {
+            return "未命中: $reason"
+        }
+        return buildString {
+            appendLine("已命中: ${ruleName.orEmpty().ifEmpty { ruleId.orEmpty() }}")
+            appendLine("source: ${source.orEmpty()}")
+            appendLine("target: ${target.orEmpty()}")
+            append("rewrite: ${rewrittenUrl.orEmpty()}")
+        }
+    }
+
+    private fun showResetConfirm(
+        context: Context,
+        parentDialog: AlertDialog,
+        onRestart: () -> Unit,
+        onEditorOpened: () -> Unit
+    ) {
         val confirmDialog = AlertDialog.Builder(context)
             .setTitle("恢复模板配置")
             .setMessage("会覆盖当前生效的 debug_network_config.json，已手动修改的映射关系会丢失。确定继续吗？")
             .setPositiveButton("确定") { dialog, _ ->
                 val success = DebugNetworkConfigManager.resetConfigToTemplate()
+                DebugOperationLog.record("network", "reset_template_confirm", success = success)
                 Log.d(TAG, "reset template confirmed success=$success")
                 Toast.makeText(context, if (success) "已恢复模板" else "恢复模板失败", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
                 parentDialog.dismiss()
-                show(context, onRestart)
+                show(context, onRestart, onEditorOpened)
             }
             .setNegativeButton("取消", null)
             .create()

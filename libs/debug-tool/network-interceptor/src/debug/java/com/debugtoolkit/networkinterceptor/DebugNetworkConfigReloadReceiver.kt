@@ -19,7 +19,7 @@ class DebugNetworkConfigReloadReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "reload broadcast received")
         DebugNetworkConfigManager.init(context)
-        val success = DebugNetworkConfigManager.reloadConfigFromFile()
+        val success = DebugNetworkConfigManager.getLastError() == null
         val mappings = DebugNetworkConfigManager.applySelectedMappings()
         Log.d(
             TAG,

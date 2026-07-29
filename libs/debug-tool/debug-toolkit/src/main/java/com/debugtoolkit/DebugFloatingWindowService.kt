@@ -32,6 +32,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.debugtoolkit.networkinterceptor.DebugNetworkConfigPanel
+import com.debugtoolkit.networkinterceptor.DebugOperationLog
 
 class DebugFloatingWindowService : Service() {
 
@@ -200,6 +201,10 @@ class DebugFloatingWindowService : Service() {
 
     private fun toggleMenu() {
         isMenuOpen = !isMenuOpen
+        DebugOperationLog.record(
+            category = "floating",
+            action = if (isMenuOpen) "menu_open" else "menu_close"
+        )
         if (isMenuOpen) {
             menuContainer.visibility = View.VISIBLE
             // 恢复宿主App图标背景
@@ -322,6 +327,7 @@ class DebugFloatingWindowService : Service() {
         try {
             val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             if (launchIntent == null) {
+                DebugOperationLog.record("app", "restart", "launchIntent is null", success = false)
                 Toast.makeText(this, "无法获取启动Intent", Toast.LENGTH_SHORT).show()
                 return
             }
@@ -345,6 +351,7 @@ class DebugFloatingWindowService : Service() {
             )
 
             Toast.makeText(this, "重启中，请稍后", Toast.LENGTH_LONG).show()
+            DebugOperationLog.record("app", "restart", "alarm scheduled", success = true)
 
             try {
                 windowManager.removeView(floatingView)
@@ -353,6 +360,7 @@ class DebugFloatingWindowService : Service() {
             android.os.Process.killProcess(android.os.Process.myPid())
         } catch (e: Exception) {
             e.printStackTrace()
+            DebugOperationLog.record("app", "restart", e.message.orEmpty(), success = false)
             Toast.makeText(this, "重启失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -361,6 +369,7 @@ class DebugFloatingWindowService : Service() {
 
     private fun clearMMKVData() {
         val success = DebugConfig.clearMMKVData()
+        DebugOperationLog.record("app", "clear_mmkv", success = success)
         val message = if (success) "MMKV 数据已清除" else "清除 MMKV 失败"
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         if (success) {
@@ -382,8 +391,10 @@ class DebugFloatingWindowService : Service() {
             val app = application
             val mockMethod = app.javaClass.getMethod(methodName, String::class.java)
             mockMethod.invoke(app, linkValue)
+            DebugOperationLog.record("attribution", methodName, linkValue, success = true)
             Toast.makeText(this, "归因Mock: $methodName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
+            DebugOperationLog.record("attribution", methodName, e.message.orEmpty(), success = false)
             Toast.makeText(this, "归因Mock失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
         toggleMenu()
@@ -393,8 +404,10 @@ class DebugFloatingWindowService : Service() {
         try {
             val method = application.javaClass.getMethod("debugResetAttribution")
             method.invoke(application)
+            DebugOperationLog.record("attribution", "reset", success = true)
             Toast.makeText(this, "归因状态已重置", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
+            DebugOperationLog.record("attribution", "reset", e.message.orEmpty(), success = false)
             Toast.makeText(this, "重置失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
         toggleMenu()
@@ -432,6 +445,7 @@ class DebugFloatingWindowService : Service() {
     // ==================== UI 权限与通知 ====================
 
     private fun requestOverlayPermission() {
+        DebugOperationLog.record("permission", "request_overlay")
         Toast.makeText(this, "请授予悬浮窗权限以显示调试工具", Toast.LENGTH_LONG).show()
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -469,93 +483,7 @@ class DebugFloatingWindowService : Service() {
         val btnOpenUri = menuContainer.findViewById<Button>(R.id.btn_open_uri)
         val btnClearUri = menuContainer.findViewById<Button>(R.id.btn_clear_uri)
 
-        // ==================== 网格按钮（含重启 + 清MMKV） ====================
-        val buttonItems = listOf(
-            // 第一行
-            ButtonItem("日志", R.drawable.ic_search, "#FF5722") {
-                try {
-                    val intent = Intent(this, Class.forName("com.hjq.logcat.LogcatActivity"))
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    Toast.makeText(this, "启动日志页面失败", Toast.LENGTH_SHORT).show()
-                }
-                toggleMenu()
-            },
-            ButtonItem("权限", R.drawable.ic_search, "#2196F3") {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:$packageName")
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                toggleMenu()
-            },
-            ButtonItem("开发者", R.drawable.ic_search, "#4CAF50") {
-                val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                toggleMenu()
-            },
-            // 第二行
-            ButtonItem("主页", R.drawable.ic_search, "#9C27B0") {
-                try {
-                    val intent = packageManager.getLaunchIntentForPackage(packageName)
-                    intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    intent?.let { startActivity(it) }
-                    toggleMenu()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    Toast.makeText(this, "打开主页失败", Toast.LENGTH_SHORT).show()
-                }
-            },
-            ButtonItem("WebView", R.drawable.ic_search, "#FF9800") {
-                val intent = Intent(this, DebugWebViewActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                toggleMenu()
-            },
-            ButtonItem("关闭", R.drawable.ic_search, "#F44336") {
-                android.os.Process.killProcess(android.os.Process.myPid())
-                toggleMenu()
-            },
-            // 第三行（新增）
-            ButtonItem("重启", R.drawable.ic_search, "#009688") {
-                restartApp()
-            },
-            ButtonItem("清MMKV", R.drawable.ic_search, "#795548") {
-                clearMMKVData()
-            },
-            ButtonItem("网络", R.drawable.ic_search, "#607D8B") {
-                DebugNetworkConfigPanel.show(
-                    context = this,
-                    onRestart = { restartApp() },
-                    onEditorOpened = { toggleMenu() }
-                )
-            },
-            // 第四行（归因测试 - 模拟真实 AF/HTM 归因回调链路）
-            ButtonItem("AF→短剧", R.drawable.ic_search, "#E91E63") {
-                mockAttributionFromApp("debugMockAFAttribution", "applovin_drama_123_0__debug__001")
-            },
-            ButtonItem("AF→小说", R.drawable.ic_search, "#3F51B5") {
-                mockAttributionFromApp("debugMockAFAttribution", "applovin_novel_456_0__debug__001")
-            },
-            ButtonItem("HTM→短剧", R.drawable.ic_search, "#009688") {
-                mockAttributionFromApp(
-                    "debugMockHTMAttribution",
-                    buildDebugDeepLink("navigator/video/player/123/0")
-                )
-            },
-            // 第五行（归因测试续）
-            ButtonItem("HTM→小说", R.drawable.ic_search, "#795548") {
-                mockAttributionFromApp(
-                    "debugMockHTMAttribution",
-                    buildDebugDeepLink("navigator/novel/read/456/0")
-                )
-            },
-            ButtonItem("重置归因", R.drawable.ic_search, "#FF9800") {
-                resetAttributionFromApp()
-            }
-        )
+        val buttonItems = createDebugActions()
 
         // 设置网格适配器
         val gridAdapter = DebugButtonAdapter(this, buttonItems)
@@ -568,13 +496,16 @@ class DebugFloatingWindowService : Service() {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(intent)
+                    DebugOperationLog.record("uri", "open", uriString, success = true)
                     toggleMenu()
                     // 打开链接后，恢复不获取焦点状态
                     updateWindowFocus(false)
                 } catch (e: Exception) {
+                    DebugOperationLog.record("uri", "open", uriString, success = false)
                     Toast.makeText(this, "无效的 URI: $uriString", Toast.LENGTH_SHORT).show()
                 }
             } else {
+                DebugOperationLog.record("uri", "open", "empty uri", success = false)
                 Toast.makeText(this, "请输入 URI", Toast.LENGTH_SHORT).show()
             }
         }
@@ -603,6 +534,117 @@ class DebugFloatingWindowService : Service() {
         }
     }
 
+    private fun createDebugActions(): List<DebugAction> {
+        return createBuiltInDebugModules()
+            .plus(DebugModuleRegistry.getModules())
+            .flatMap { module -> module.createActions() }
+            .filter { action -> action.visible(this) }
+    }
+
+    private fun createBuiltInDebugModules(): List<DebugModule> {
+        return listOf(
+            SimpleDebugModule("system", "系统") {
+                listOf(
+                    DebugAction("system.log", "日志", R.drawable.ic_search, "#FF5722", "system") {
+                        try {
+                            val intent = Intent(this, Class.forName("com.hjq.logcat.LogcatActivity"))
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            Toast.makeText(this, "启动日志页面失败", Toast.LENGTH_SHORT).show()
+                        }
+                        toggleMenu()
+                    },
+                    DebugAction("system.permission", "权限", R.drawable.ic_search, "#2196F3", "system") {
+                        DebugPermissionPanel.show(this)
+                        toggleMenu()
+                    },
+                    DebugAction("system.developer", "开发者", R.drawable.ic_search, "#4CAF50", "system") {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        toggleMenu()
+                    }
+                )
+            },
+            SimpleDebugModule("app", "应用") {
+                listOf(
+                    DebugAction("app.home", "主页", R.drawable.ic_search, "#9C27B0", "app") {
+                        try {
+                            val intent = packageManager.getLaunchIntentForPackage(packageName)
+                            intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            intent?.let { startActivity(it) }
+                            toggleMenu()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            Toast.makeText(this, "打开主页失败", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    DebugAction("app.webview", "WebView", R.drawable.ic_search, "#FF9800", "app") {
+                        val intent = Intent(this, DebugWebViewActivity::class.java)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        toggleMenu()
+                    },
+                    DebugAction("app.close", "关闭", R.drawable.ic_search, "#F44336", "app") {
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                        toggleMenu()
+                    },
+                    DebugAction("app.restart", "重启", R.drawable.ic_search, "#009688", "app") {
+                        restartApp()
+                    },
+                    DebugAction("app.clear_mmkv", "清MMKV", R.drawable.ic_search, "#795548", "app") {
+                        clearMMKVData()
+                    },
+                    DebugAction("app.diagnostic", "诊断", R.drawable.ic_search, "#607D8B", "app") {
+                        DebugDiagnosticReporter.share(this)
+                        toggleMenu()
+                    }
+                )
+            },
+            SimpleDebugModule("network", "网络") {
+                listOf(
+                    DebugAction("network.config", "网络", R.drawable.ic_search, "#607D8B", "network") {
+                        DebugNetworkConfigPanel.show(
+                            context = this,
+                            onRestart = { restartApp() },
+                            onEditorOpened = { toggleMenu() }
+                        )
+                    }
+                )
+            },
+            SimpleDebugModule("host", "业务") {
+                DebugHostBridge.createDebugActions(this)
+            },
+            SimpleDebugModule("attribution", "归因") {
+                listOf(
+                    DebugAction("attribution.af_drama", "AF→短剧", R.drawable.ic_search, "#E91E63", "attribution") {
+                        mockAttributionFromApp("debugMockAFAttribution", "applovin_drama_123_0__debug__001")
+                    },
+                    DebugAction("attribution.af_novel", "AF→小说", R.drawable.ic_search, "#3F51B5", "attribution") {
+                        mockAttributionFromApp("debugMockAFAttribution", "applovin_novel_456_0__debug__001")
+                    },
+                    DebugAction("attribution.htm_drama", "HTM→短剧", R.drawable.ic_search, "#009688", "attribution") {
+                        mockAttributionFromApp(
+                            "debugMockHTMAttribution",
+                            buildDebugDeepLink("navigator/video/player/123/0")
+                        )
+                    },
+                    DebugAction("attribution.htm_novel", "HTM→小说", R.drawable.ic_search, "#795548", "attribution") {
+                        mockAttributionFromApp(
+                            "debugMockHTMAttribution",
+                            buildDebugDeepLink("navigator/novel/read/456/0")
+                        )
+                    },
+                    DebugAction("attribution.reset", "重置归因", R.drawable.ic_search, "#FF9800", "attribution") {
+                        resetAttributionFromApp()
+                    }
+                )
+            }
+        )
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // 销毁时保存当前位置
@@ -615,12 +657,4 @@ class DebugFloatingWindowService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    // 按钮数据类
-    data class ButtonItem(
-        val text: String,
-        val iconResId: Int,
-        val backgroundColor: String,
-        val onClick: () -> Unit
-    )
 }

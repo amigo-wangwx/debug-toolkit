@@ -8,15 +8,16 @@ import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.TextView
+import com.debugtoolkit.networkinterceptor.DebugOperationLog
 
 class DebugButtonAdapter(
     private val context: Context,
-    private val items: List<DebugFloatingWindowService.ButtonItem>
+    private val items: List<DebugAction>
 ) : BaseAdapter() {
 
     override fun getCount(): Int = items.size
 
-    override fun getItem(position: Int): DebugFloatingWindowService.ButtonItem = items[position]
+    override fun getItem(position: Int): DebugAction = items[position]
 
     override fun getItemId(position: Int): Long = position.toLong()
 
@@ -38,9 +39,16 @@ class DebugButtonAdapter(
         val item = getItem(position)
 
         // 设置按钮文本和背景色
-        holder.button.text = item.text
+        holder.button.text = item.title
         holder.button.setBackgroundColor(Color.parseColor(item.backgroundColor))
-        holder.button.setOnClickListener { item.onClick() }
+        holder.button.setOnClickListener {
+            DebugOperationLog.record(
+                category = item.group,
+                action = item.id,
+                message = "click title=${item.title}"
+            )
+            item.onClick()
+        }
 
         return view
     }

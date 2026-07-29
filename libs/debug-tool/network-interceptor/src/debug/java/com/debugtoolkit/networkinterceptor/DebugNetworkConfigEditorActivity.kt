@@ -29,6 +29,7 @@ class DebugNetworkConfigEditorActivity : Activity() {
 
     private var sourceUri: Uri? = null
     private var editorMode: EditorMode = EditorMode.CONFIG
+    private var configSourceText: String = ""
     private var pendingPermissionText: String? = null
     private var pendingPermissionFinishAfterSave: Boolean = false
 
@@ -198,14 +199,18 @@ class DebugNetworkConfigEditorActivity : Activity() {
         val uri = sourceUri
         if (uri != null) {
             titleView.text = "编辑 JSON 配置"
-            statusView.text = uri.toString()
+            statusView.text = buildExternalStatusText(uri)
             val text = readTextFromUri(uri)
             if (text == null) {
                 Log.d(TAG, "external config read empty uri=$uri")
                 toast("读取 JSON 文件失败")
                 return
             }
-            Log.d(TAG, "external config loaded uri=$uri length=${text.length}")
+            Log.d(
+                TAG,
+                "external config loaded uri=$uri scheme=${uri.scheme} flags=${intent.flags} " +
+                        "writeGrant=${hasWriteUriGrant()} length=${text.length}"
+            )
             editorView.setText(text)
             return
         }
@@ -214,7 +219,7 @@ class DebugNetworkConfigEditorActivity : Activity() {
         titleView.text = "编辑网络拦截配置"
         val path = DebugNetworkConfigManager.getConfigFilePath()
         val text = DebugNetworkConfigManager.readConfigText().orEmpty()
-        statusView.text = path
+        statusView.text = buildConfigStatusText(path)
         Log.d(TAG, "default config loaded path=$path length=${text.length}")
         editorView.setText(text)
     }
@@ -246,13 +251,19 @@ class DebugNetworkConfigEditorActivity : Activity() {
         DebugNetworkConfigManager.init(this)
         if (!DebugNetworkConfigManager.writeConfigText(formatted)) {
             Log.d(TAG, "save config failed mode=$editorMode")
-            toast("保存失败，请确认配置文件可写")
+            val error = DebugNetworkConfigManager.getLastError()
+                ?.lineSequence()
+                ?.firstOrNull()
+                .orEmpty()
+            DebugNetworkConfigManager.getLastError()?.let { statusView.text = "配置校验失败:\n$it" }
+            toast(error.ifEmpty { "保存失败，请确认配置文件可写" })
             return
         }
+        titleView.text = "编辑网络拦截配置"
         editorMode = EditorMode.CONFIG
         sourceUri = null
         editorView.setText(formatted)
-        statusView.text = DebugNetworkConfigManager.getConfigFilePath()
+        statusView.text = buildConfigStatusText(DebugNetworkConfigManager.getConfigFilePath())
         sendReloadBroadcast()
         Log.d(TAG, "save config success path=${DebugNetworkConfigManager.getConfigFilePath()}")
         toast("已保存")
@@ -275,7 +286,7 @@ class DebugNetworkConfigEditorActivity : Activity() {
 
         if (writeTextToExternalUri(uri, formatted, finishAfterSave, retryAfterPermission)) {
             editorView.setText(formatted)
-            statusView.text = uri.toString()
+            statusView.text = buildExternalStatusText(uri)
             Log.d(TAG, "save external success uri=$uri")
             toast("已保存")
             if (finishAfterSave) {
@@ -331,9 +342,10 @@ class DebugNetworkConfigEditorActivity : Activity() {
             }
 
         editorMode = EditorMode.PENDING_IMPORT
+        configSourceText = "从外部 JSON 导入: $uri"
         sourceUri = null
         editorView.setText(formatted)
-        statusView.text = "待导入为网络拦截配置: $uri"
+        statusView.text = buildPendingImportStatusText(configSourceText)
         Log.d(TAG, "import config loaded uri=$uri length=${formatted.length}")
         toast("已载入，点击保存后生效")
     }
@@ -341,9 +353,14 @@ class DebugNetworkConfigEditorActivity : Activity() {
     private fun markCurrentTextAsPendingImport() {
         val formatted = parseEditorJson() ?: return
         editorMode = EditorMode.PENDING_IMPORT
+        configSourceText = when {
+            sourceUri != null -> "从当前外部 JSON 标记: $sourceUri"
+            configSourceText.isNotBlank() -> configSourceText
+            else -> "从当前编辑内容标记"
+        }
         sourceUri = null
         editorView.setText(formatted)
-        statusView.text = "待导入为网络拦截配置"
+        statusView.text = buildPendingImportStatusText(configSourceText)
         Log.d(TAG, "current text marked as pending import length=${formatted.length}")
         toast("已标记为配置，点击保存后生效")
     }
@@ -442,6 +459,52 @@ class DebugNetworkConfigEditorActivity : Activity() {
     private fun needsWriteExternalStoragePermission(): Boolean {
         return Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P &&
                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun buildExternalStatusText(uri: Uri): String {
+        return buildString {
+            appendLine(uri.toString())
+            append("外部 JSON 文件: ")
+            append(resolveExternalWriteStatus(uri))
+        }
+    }
+
+    private fun buildConfigStatusText(path: String): String {
+        return buildString {
+            appendLine("当前模式: 网络拦截生效配置")
+            appendLine("配置文件: $path")
+            if (configSourceText.isNotBlank()) {
+                append("来源: $configSourceText")
+            }
+        }.trimEnd()
+    }
+
+    private fun buildPendingImportStatusText(sourceText: String): String {
+        return buildString {
+            appendLine("当前模式: 待导入为网络拦截配置")
+            appendLine("来源: $sourceText")
+            append("点击保存后写入 App 专属配置并生效")
+        }
+    }
+
+    private fun resolveExternalWriteStatus(uri: Uri): String {
+        if (uri.scheme == "file") {
+            return if (needsWriteExternalStoragePermission()) {
+                "保存前会申请写入权限；无权限时可使用另存为，或导入为配置后保存生效。"
+            } else {
+                "保存会尝试写回原文件；失败时可使用另存为，或导入为配置后保存生效。"
+            }
+        }
+
+        return if (hasWriteUriGrant()) {
+            "保存会写回原文件；导入为配置后保存才会作为网络拦截配置生效。"
+        } else {
+            "当前未检测到写入授权，保存可能失败；可使用另存为，或导入为配置后保存生效。"
+        }
+    }
+
+    private fun hasWriteUriGrant(): Boolean {
+        return intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
     }
 
     private fun sendReloadBroadcast() {

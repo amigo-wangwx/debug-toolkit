@@ -2,7 +2,6 @@ package com.debugtoolkit.networkinterceptor
 
 import android.util.Log
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
 
@@ -95,7 +94,7 @@ class BaseUrlInterceptor : Interceptor {
             if (source.scheme != null && source.scheme != url.scheme) return false
             if (source.host != url.host) return false
             if (source.port != null && source.port != url.port) return false
-            return isPathPrefixMatch(source.encodedPathPrefix, url.encodedPath)
+            return DebugNetworkBaseUrlParser.isPathPrefixMatch(source.encodedPathPrefix, url.encodedPath)
         }
 
         fun rewriteEncodedPath(originalPath: String): String {
@@ -104,7 +103,7 @@ class BaseUrlInterceptor : Interceptor {
                 originalPath -> ""
                 else -> originalPath.removePrefix(source.encodedPathPrefix)
             }
-            return mergeEncodedPath(target.encodedPathPrefix, remainPath)
+            return DebugNetworkBaseUrlParser.mergeEncodedPath(target.encodedPathPrefix, remainPath)
         }
 
         fun describe(): String {
@@ -135,7 +134,7 @@ class BaseUrlInterceptor : Interceptor {
 
         companion object {
             fun parse(value: String): BaseUrlSource? {
-                val parsed = parseBaseUrl(value) ?: return null
+                val parsed = DebugNetworkBaseUrlParser.parse(value) ?: return null
                 val explicitPartCount = listOfNotNull(
                     parsed.scheme,
                     parsed.port,
@@ -145,7 +144,7 @@ class BaseUrlInterceptor : Interceptor {
                     scheme = parsed.scheme,
                     host = parsed.url.host,
                     port = parsed.port,
-                    encodedPathPrefix = normalizeEncodedPath(parsed.encodedPath),
+                    encodedPathPrefix = DebugNetworkBaseUrlParser.normalizeEncodedPath(parsed.encodedPath),
                     explicitPartCount = explicitPartCount
                 )
             }
@@ -169,23 +168,16 @@ class BaseUrlInterceptor : Interceptor {
 
         companion object {
             fun parse(value: String): BaseUrlTarget? {
-                val parsed = parseBaseUrl(value) ?: return null
+                val parsed = DebugNetworkBaseUrlParser.parse(value) ?: return null
                 return BaseUrlTarget(
                     scheme = parsed.scheme,
                     host = parsed.url.host,
                     port = parsed.port,
-                    encodedPathPrefix = normalizeEncodedPath(parsed.encodedPath)
+                    encodedPathPrefix = DebugNetworkBaseUrlParser.normalizeEncodedPath(parsed.encodedPath)
                 )
             }
         }
     }
-
-    private data class ParsedBaseUrl(
-        val url: HttpUrl,
-        val scheme: String?,
-        val port: Int?,
-        val encodedPath: String
-    )
 
     private fun controlLog(message: String) {
         Log.d(TAG, message)
@@ -199,45 +191,5 @@ class BaseUrlInterceptor : Interceptor {
 
     private companion object {
         private const val TAG = "DebugNetwork-Rewrite"
-
-        fun parseBaseUrl(value: String): ParsedBaseUrl? {
-            val normalizedValue = value.trim().takeIf { it.isNotEmpty() } ?: return null
-            if (normalizedValue.contains('?') || normalizedValue.contains('#')) return null
-
-            val hasScheme = normalizedValue.contains("://")
-            val parseValue = if (hasScheme) normalizedValue else "https://$normalizedValue"
-            val url = parseValue.toHttpUrlOrNull() ?: return null
-
-            return ParsedBaseUrl(
-                url = url,
-                scheme = url.scheme.takeIf { hasScheme },
-                port = url.port.takeIf { hasExplicitPort(normalizedValue, hasScheme) },
-                encodedPath = url.encodedPath
-            )
-        }
-
-        fun hasExplicitPort(value: String, hasScheme: Boolean): Boolean {
-            val withoutScheme = if (hasScheme) value.substringAfter("://") else value
-            val authority = withoutScheme.substringBefore('/').substringBefore('?').substringBefore('#')
-            val portText = authority.substringAfterLast(':', missingDelimiterValue = "")
-            return portText.isNotEmpty() && portText.all { it.isDigit() }
-        }
-
-        fun normalizeEncodedPath(path: String): String {
-            if (path.isEmpty() || path == "/") return "/"
-            return path.trimEnd('/')
-        }
-
-        fun isPathPrefixMatch(sourcePath: String, requestPath: String): Boolean {
-            if (sourcePath == "/") return true
-            if (requestPath == sourcePath) return true
-            return requestPath.startsWith("$sourcePath/")
-        }
-
-        fun mergeEncodedPath(targetPath: String, remainPath: String): String {
-            val normalizedRemain = remainPath.takeIf { it.isNotEmpty() } ?: return targetPath
-            if (targetPath == "/") return normalizedRemain
-            return "$targetPath$normalizedRemain"
-        }
     }
 }

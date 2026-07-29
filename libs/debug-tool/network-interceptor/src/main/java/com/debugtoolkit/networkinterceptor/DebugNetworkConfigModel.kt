@@ -17,3 +17,14 @@ data class DebugNetworkConfig(
     val selectRuleIds: List<String>,
     val rules: List<DebugNetworkRule>
 )
+
+data class DebugNetworkRewritePreview(
+    val inputUrl: String,
+    val ruleId: String?,
+    val ruleName: String? = null,
+    val hit: Boolean,
+    val source: String? = null,
+    val target: String? = null,
+    val rewrittenUrl: String? = null,
+    val reason: String = ""
+)
