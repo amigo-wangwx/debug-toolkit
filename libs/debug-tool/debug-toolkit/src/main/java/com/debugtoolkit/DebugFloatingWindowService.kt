@@ -223,6 +223,18 @@ class DebugFloatingWindowService : Service() {
         }
     }
 
+    /**
+     * 供 HostAction 使用的安全关闭入口。
+     *
+     * HostAction 只能表达“点击成功后需要关闭菜单”，不能直接访问 Service 内部菜单状态。
+     * 这里先判断 isMenuOpen，避免菜单已关闭时再次 toggle 导致反向打开。
+     */
+    private fun closeMenuIfOpen() {
+        if (isMenuOpen) {
+            toggleMenu()
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun setupDragListener() {
         // 获取系统推荐触摸阈值
@@ -615,7 +627,7 @@ class DebugFloatingWindowService : Service() {
                 )
             },
             SimpleDebugModule("host", "业务") {
-                DebugHostBridge.createDebugActions(this)
+                DebugHostBridge.createDebugActions(this, ::closeMenuIfOpen)
             },
             SimpleDebugModule("attribution", "归因") {
                 listOf(
