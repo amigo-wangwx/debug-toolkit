@@ -6,6 +6,7 @@ import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
@@ -59,7 +60,9 @@ class DebugInitProvider : ContentProvider() {
                     // 其他方法不需要实现
                     override fun onActivityPaused(activity: Activity) {}
                     override fun onActivityStarted(activity: Activity) {}
-                    override fun onActivityDestroyed(activity: Activity) {}
+                    override fun onActivityDestroyed(activity: Activity) {
+                        dismissPermissionDialogIfOwnedBy(activity)
+                    }
                     override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) {}
                     override fun onActivityStopped(activity: Activity) {}
                     override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) {}
@@ -73,21 +76,61 @@ class DebugInitProvider : ContentProvider() {
     }
 
     private fun showPermissionDialog(activity: Activity, callback: Application.ActivityLifecycleCallbacks) {
-        if (alertPermissionDialog?.isShowing == true) alertPermissionDialog?.dismiss()
+        dismissPermissionDialog()
 
         // 创建 Dialog
-        alertPermissionDialog = AlertDialog.Builder(activity)
+        val dialog = AlertDialog.Builder(activity)
             .setTitle("提示")
             .setMessage("请授予悬浮窗权限以显示调试工具")
-            .setPositiveButton("确定") { _, _ -> requestOverlayPermission(activity) }
+            .setPositiveButton("确定") { _, _ ->
+                dismissPermissionDialog()
+                requestOverlayPermission(activity)
+            }
             .setNegativeButton("取消") { _, _ ->
+                dismissPermissionDialog()
                 (activity.applicationContext as Application).unregisterActivityLifecycleCallbacks(callback)
             }
             .create()
+            .also { createdDialog ->
+                createdDialog.setOnDismissListener {
+                    if (alertPermissionDialog === createdDialog) {
+                        alertPermissionDialog = null
+                    }
+                }
+            }
+
+        alertPermissionDialog = dialog
 
         // 显示 Dialog
-        alertPermissionDialog?.show()
+        dialog.show()
 
+    }
+
+    private fun dismissPermissionDialog() {
+        val dialog = alertPermissionDialog
+        alertPermissionDialog = null
+        if (dialog?.isShowing == true) {
+            dialog.dismiss()
+        }
+    }
+
+    private fun dismissPermissionDialogIfOwnedBy(activity: Activity) {
+        val dialog = alertPermissionDialog ?: return
+        if (dialog.context.findActivity() === activity) {
+            dismissPermissionDialog()
+        }
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var current: Context? = this
+        while (current != null) {
+            when (current) {
+                is Activity -> return current
+                is ContextWrapper -> current = current.baseContext
+                else -> return null
+            }
+        }
+        return null
     }
 
     private fun requestOverlayPermission(activity: Activity) {
