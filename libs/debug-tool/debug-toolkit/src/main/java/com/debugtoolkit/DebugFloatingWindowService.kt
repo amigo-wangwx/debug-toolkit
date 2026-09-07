@@ -503,22 +503,20 @@ class DebugFloatingWindowService : Service() {
 
         btnOpenUri.setOnClickListener {
             val uriString = etUri.text.toString().trim()
-            if (uriString.isNotEmpty()) {
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString))
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(intent)
-                    DebugOperationLog.record("uri", "open", uriString, success = true)
-                    toggleMenu()
-                    // 打开链接后，恢复不获取焦点状态
-                    updateWindowFocus(false)
-                } catch (e: Exception) {
-                    DebugOperationLog.record("uri", "open", uriString, success = false)
-                    Toast.makeText(this, "无效的 URI: $uriString", Toast.LENGTH_SHORT).show()
-                }
-            } else {
+            if (uriString.isEmpty()) {
                 DebugOperationLog.record("uri", "open", "empty uri", success = false)
                 Toast.makeText(this, "请输入 URI", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // 宿主输入 action 优先处理业务协议；未命中时保持原有 URI 打开行为。
+            when (val result = DebugHostBridge.processInput(this, uriString)) {
+                DebugHostBridge.HostInputResult.NotHandled -> openInputUri(uriString, Uri.parse(uriString))
+                DebugHostBridge.HostInputResult.Handled -> finishInputHandling()
+                is DebugHostBridge.HostInputResult.OpenUri -> openInputUri(uriString, result.uri)
+                is DebugHostBridge.HostInputResult.Rejected -> {
+                    Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
@@ -544,6 +542,26 @@ class DebugFloatingWindowService : Service() {
             etUri.requestFocus()
             updateWindowFocus(true)
         }
+    }
+
+    /** 打开原始或宿主转换后的 URI；失败时保留菜单和输入内容，方便修正后重试。 */
+    private fun openInputUri(input: String, uri: Uri) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            DebugOperationLog.record("uri", "open", "$input -> $uri", success = true)
+            finishInputHandling()
+        } catch (error: Exception) {
+            DebugOperationLog.record("uri", "open", input, success = false)
+            Toast.makeText(this, "无效的 URI: $input", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 输入处理成功后收起菜单并释放输入焦点。 */
+    private fun finishInputHandling() {
+        toggleMenu()
+        updateWindowFocus(false)
     }
 
     private fun createDebugActions(): List<DebugAction> {

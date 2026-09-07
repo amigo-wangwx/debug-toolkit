@@ -83,6 +83,22 @@ dependencies {
 
 `debug-toolkit` 已依赖 `network-interceptor`，通常只需一行依赖即可。`<version>` 使用 JitPack 页面或上方 badge 显示的最新版本。
 
+## 宿主输入 Action
+
+浮窗底部输入框会优先将内容交给宿主注册的 `HostInputAction`；全部 action 返回 `NotHandled` 时，继续按普通 URI 使用 `Intent.ACTION_VIEW` 打开。
+
+```kotlin
+DebugHostBridge.registerInputAction(
+    DebugHostBridge.HostInputAction(id = "business_protocol") { context, input ->
+        val uri = parseBusinessProtocol(input)
+            ?: return@HostInputAction DebugHostBridge.HostInputResult.NotHandled
+        DebugHostBridge.HostInputResult.OpenUri(uri)
+    }
+)
+```
+
+`Rejected` 用于展示协议校验错误并保留输入内容，`Handled` 表示宿主已经完成处理。多个 action 按注册顺序执行，第一个非 `NotHandled` 结果生效。
+
 ## 网络配置文件
 
 调用方可以在 App 的 source set 根目录放置 `debug_network_config.json`，例如：

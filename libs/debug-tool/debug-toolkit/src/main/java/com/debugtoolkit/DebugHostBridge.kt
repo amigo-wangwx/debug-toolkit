@@ -1,11 +1,30 @@
 package com.debugtoolkit
 
 import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
 import android.widget.Toast
 import com.debugtoolkit.networkinterceptor.DebugOperationLog
 
 object DebugHostBridge {
+    /** 宿主对浮窗输入内容的处理结果；未处理时由 debug-toolkit 继续执行默认 URI 打开逻辑。 */
+    sealed interface HostInputResult {
+        data object NotHandled : HostInputResult
+        data object Handled : HostInputResult
+        data class OpenUri(val uri: Uri) : HostInputResult
+        data class Rejected(val message: String) : HostInputResult
+    }
+
+    /**
+     * 宿主注册到 debug-toolkit 输入框的处理动作。
+     *
+     * 处理边界：action 自行判断输入是否属于其协议；不属于时必须返回 NotHandled，允许后续 action 或默认 URI 逻辑继续处理。
+     */
+    data class HostInputAction(
+        val id: String,
+        val process: (Context, String) -> HostInputResult
+    )
+
     /**
      * 宿主业务注册到 debug-toolkit 的单个调试按钮。
      *
@@ -46,6 +65,7 @@ object DebugHostBridge {
 
     private val actions = mutableListOf<HostAction>()
     private val actionProviders = linkedMapOf<String, HostActionProvider>()
+    private val inputActions = linkedMapOf<String, HostInputAction>()
     private var infoProvider: HostInfoProvider? = null
 
     @Synchronized
@@ -77,6 +97,21 @@ object DebugHostBridge {
     @Synchronized
     fun clearActionProviders() {
         actionProviders.clear()
+    }
+
+    @Synchronized
+    fun registerInputAction(action: HostInputAction) {
+        inputActions[action.id] = action
+    }
+
+    @Synchronized
+    fun unregisterInputAction(actionId: String) {
+        inputActions.remove(actionId)
+    }
+
+    @Synchronized
+    fun clearInputActions() {
+        inputActions.clear()
     }
 
     @Synchronized
@@ -158,6 +193,39 @@ object DebugHostBridge {
                 )
             }
             .getOrDefault(emptyMap())
+    }
+
+    /**
+     * 按注册顺序将浮窗输入交给宿主处理。
+     *
+     * 返回边界：第一个非 NotHandled 结果立即返回；全部 action 均不处理时由浮窗执行原有 URI 打开逻辑。
+     */
+    fun processInput(context: Context, input: String): HostInputResult {
+        val registeredActions = synchronized(this) { inputActions.values.toList() }
+
+        registeredActions.forEach { action ->
+            val result = runCatching { action.process(context, input) }
+                .getOrElse { error ->
+                    DebugOperationLog.record(
+                        category = "host_input",
+                        action = action.id,
+                        message = error.message.orEmpty(),
+                        success = false
+                    )
+                    return HostInputResult.Rejected(error.message ?: "输入处理失败")
+                }
+            if (result is HostInputResult.NotHandled) return@forEach
+
+            DebugOperationLog.record(
+                category = "host_input",
+                action = action.id,
+                message = result::class.java.simpleName,
+                success = result !is HostInputResult.Rejected
+            )
+            return result
+        }
+
+        return HostInputResult.NotHandled
     }
 
     /**
